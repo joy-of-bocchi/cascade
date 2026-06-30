@@ -17,8 +17,6 @@ from __future__ import annotations
 import pathlib
 from abc import ABC, abstractmethod
 
-from pydantic import BaseModel
-
 import structlint
 from d2spec import DiagramSpec
 
@@ -37,9 +35,10 @@ class RenderBackend(ABC):
 
     @abstractmethod
     def render_er(
-        self, roots: list[type[BaseModel]], direction: str = DEFAULT_ER_DIRECTION
+        self, roots: list[type], direction: str = DEFAULT_ER_DIRECTION
     ) -> str:
-        """Render an ER diagram from Pydantic model roots into this backend's source syntax."""
+        """Render an ER diagram from typed entity roots (Pydantic models or
+        dataclasses) into this backend's source syntax."""
 
     @abstractmethod
     def extract_graph(self, text: str) -> structlint.Graph:

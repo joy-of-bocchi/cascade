@@ -9,8 +9,6 @@ roots) and dispatches to the chosen backend so callers never hardcode a syntax.
 
 from __future__ import annotations
 
-from pydantic import BaseModel
-
 import structlint
 from backends.base import DEFAULT_ER_DIRECTION, RenderBackend
 from backends.d2 import D2Backend
@@ -40,11 +38,12 @@ def render(spec: DiagramSpec, backend: RenderBackend | None = None) -> str:
 
 
 def render_er(
-    roots: list[type[BaseModel]],
+    roots: list[type],
     backend: RenderBackend | None = None,
     direction: str = DEFAULT_ER_DIRECTION,
 ) -> str:
-    """Render an ER diagram from Pydantic roots. Defaults to Mermaid."""
+    """Render an ER diagram from typed entity roots (Pydantic models or
+    dataclasses). Defaults to Mermaid."""
     backend = backend or MermaidBackend()
     return backend.render_er(roots, direction=direction)
 

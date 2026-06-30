@@ -19,8 +19,6 @@ from __future__ import annotations
 import pathlib
 import re
 
-from pydantic import BaseModel
-
 import structlint
 from backends.base import DEFAULT_ER_DIRECTION, RenderBackend
 from backends.d2 import ROLE_STYLE, _closure, _field_refs
@@ -30,6 +28,7 @@ from d2spec import (
     ModelNode,
     NodeRole,
     TerminalNode,
+    entity_fields,
     type_str,
 )
 
@@ -96,12 +95,15 @@ def _nid(raw: str) -> str:
 
 
 def _esc(text: str) -> str:
-    """Escape dynamic text for a quoted Mermaid label (HTML-label renderer)."""
+    """Escape dynamic text for a quoted Mermaid label (HTML-label renderer).
+    Newlines become `<br/>` so multi-line labels render as line breaks rather
+    than corrupting the source."""
     return (
         text.replace("&", "&amp;")
         .replace("<", "&lt;")
         .replace(">", "&gt;")
         .replace('"', "&quot;")
+        .replace("\n", "<br/>")
     )
 
 
@@ -121,8 +123,8 @@ def _attr_type(rendered: str) -> str:
 def _model_label(node: ModelNode) -> str:
     """The flowchart box label: bold model name, then one field per line."""
     parts: list[str] = [f"<b>{_esc(node.model.__name__)}</b>"]
-    for name, info in node.model.model_fields.items():
-        parts.append(f"{_esc(name)}: {_esc(type_str(info.annotation))}")
+    for view in entity_fields(node.model):
+        parts.append(f"{_esc(view.name)}: {_esc(type_str(view.annotation))}")
     return "<br/>".join(parts)
 
 
@@ -192,7 +194,7 @@ class MermaidBackend(RenderBackend):
         return "\n".join(out) + "\n"
 
     def render_er(
-        self, roots: list[type[BaseModel]], direction: str = DEFAULT_ER_DIRECTION
+        self, roots: list[type], direction: str = DEFAULT_ER_DIRECTION
     ) -> str:
         models = _closure(roots)
         in_scope = set(models)
@@ -201,13 +203,11 @@ class MermaidBackend(RenderBackend):
 
         for model in models:
             out.append(f"  class {model.__name__} {{")
-            for name, info in model.model_fields.items():
-                out.append(f"    +{_attr_type(type_str(info.annotation))} {name}")
-            for name, info in (
-                getattr(model, "model_computed_fields", {}) or {}
-            ).items():
-                attr = _attr_type(type_str(info.return_type)) + COMPUTED_MARKER
-                out.append(f"    +{attr} {name}")
+            for view in entity_fields(model):
+                attr = _attr_type(type_str(view.annotation))
+                if view.computed:
+                    attr += COMPUTED_MARKER
+                out.append(f"    +{attr} {view.name}")
             out.append("  }")
         out.append("")
 

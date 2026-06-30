@@ -15,8 +15,6 @@ import re
 from types import UnionType
 from typing import Any, Union, get_args, get_origin
 
-from pydantic import BaseModel
-
 import structlint
 from backends.base import DEFAULT_ER_DIRECTION, RenderBackend
 from d2spec import (
@@ -26,7 +24,9 @@ from d2spec import (
     ModelNode,
     NodeRole,
     TerminalNode,
-    field_default,
+    entity_fields,
+    is_entity,
+    is_frozen,
     type_str,
 )
 
@@ -63,21 +63,29 @@ D2_LAYOUT_ENGINE = "elk"
 
 
 def _q(text: str) -> str:
-    return text.replace("\\", "").replace('"', "'").replace("$", "\\$")
+    """Quote-escape dynamic text for a D2 double-quoted string. A literal
+    newline would terminate the string, so it is emitted as the `\\n` escape,
+    which D2 renders as a line break."""
+    return (
+        text.replace("\\", "")
+        .replace('"', "'")
+        .replace("$", "\\$")
+        .replace("\n", "\\n")
+    )
 
 
 def model_table(node: ModelNode) -> list[str]:
     model = node.model
-    frozen = " (frozen)" if model.model_config.get("frozen", False) else ""
+    frozen = " (frozen)" if is_frozen(model) else ""
     header = ["field", "type", "default", "note"]
     rows: list[list[str]] = [header]
-    for name, info in model.model_fields.items():
+    for view in entity_fields(model):
         rows.append(
             [
-                name,
-                type_str(info.annotation),
-                field_default(info),
-                info.description or "",
+                view.name,
+                type_str(view.annotation),
+                view.default,
+                view.description,
             ]
         )
     widths = [max(len(row[col]) for row in rows) for col in range(len(header))]
@@ -94,14 +102,14 @@ def model_table(node: ModelNode) -> list[str]:
     return [f"{model.__name__}{frozen}", *(fmt(row) for row in rows)]
 
 
-def _referenced(annotation: Any) -> list[tuple[type[BaseModel], str]]:
-    """Every (model, cardinality) a type annotation points at."""
-    found: list[tuple[type[BaseModel], str]] = []
+def _referenced(annotation: Any) -> list[tuple[type, str]]:
+    """Every (entity, cardinality) a type annotation points at."""
+    found: list[tuple[type, str]] = []
 
     def walk(node: Any, card: str) -> None:
         origin = get_origin(node)
         if origin is None:
-            if isinstance(node, type) and issubclass(node, BaseModel):
+            if is_entity(node):
                 found.append((node, card))
             return
         args = get_args(node)
@@ -125,19 +133,16 @@ def _referenced(annotation: Any) -> list[tuple[type[BaseModel], str]]:
     return found
 
 
-def _field_refs(model: type[BaseModel]) -> list[tuple[str, type[BaseModel], str]]:
-    refs: list[tuple[str, type[BaseModel], str]] = []
-    for name, info in model.model_fields.items():
-        for ref, card in _referenced(info.annotation):
-            refs.append((name, ref, card))
-    for name, info in (getattr(model, "model_computed_fields", {}) or {}).items():
-        for ref, card in _referenced(info.return_type):
-            refs.append((name, ref, card))
+def _field_refs(model: type) -> list[tuple[str, type, str]]:
+    refs: list[tuple[str, type, str]] = []
+    for view in entity_fields(model):
+        for ref, card in _referenced(view.annotation):
+            refs.append((view.name, ref, card))
     return refs
 
 
-def _closure(roots: list[type[BaseModel]]) -> list[type[BaseModel]]:
-    ordered: dict[type[BaseModel], None] = {}
+def _closure(roots: list[type]) -> list[type]:
+    ordered: dict[type, None] = {}
     stack = list(roots)
     while stack:
         model = stack.pop()
@@ -219,12 +224,12 @@ class D2Backend(RenderBackend):
         return "\n".join(out) + "\n"
 
     def render_er(
-        self, roots: list[type[BaseModel]], direction: str = DEFAULT_ER_DIRECTION
+        self, roots: list[type], direction: str = DEFAULT_ER_DIRECTION
     ) -> str:
         models = _closure(roots)
         in_scope = set(models)
         out: list[str] = [
-            "# ER diagram auto-generated from Pydantic models by d2er.py",
+            "# ER diagram auto-generated from typed models by d2er.py",
             f"direction: {direction}",
             "",
         ]
@@ -232,12 +237,9 @@ class D2Backend(RenderBackend):
         for model in models:
             out.append(f"{model.__name__}: {{")
             out.append("  shape: sql_table")
-            for name, info in model.model_fields.items():
-                out.append(f'  "{name}": "{type_str(info.annotation)}"')
-            for name, info in (
-                getattr(model, "model_computed_fields", {}) or {}
-            ).items():
-                out.append(f'  "{name}": "{type_str(info.return_type)} (computed)"')
+            for view in entity_fields(model):
+                suffix = " (computed)" if view.computed else ""
+                out.append(f'  "{view.name}": "{type_str(view.annotation)}{suffix}"')
             out.append("}")
         out.append("")
 

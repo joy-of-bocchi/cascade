@@ -16,10 +16,8 @@ The emission logic lives in the D2 render backend; this is the stable entry poin
 
 from __future__ import annotations
 
-from pydantic import BaseModel
-
 from backends.d2 import D2Backend
 
 
-def build_er_d2(roots: list[type[BaseModel]], direction: str = "right") -> str:
+def build_er_d2(roots: list[type], direction: str = "right") -> str:
     return D2Backend().render_er(roots, direction)
