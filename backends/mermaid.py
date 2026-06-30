@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""The Mermaid render backend: `flowchart` and `classDiagram` emission, Mermaid
+"""The Mermaid render backend: `flowchart` and `erDiagram` emission, Mermaid
 source parsing, and the `mmdc` CLI invocation for SVG rasterization.
 
 A `DiagramSpec` renders to a Mermaid `flowchart`: model boxes, decision rhombi,
 and terminal stadiums can all live together, optionally wrapped in `subgraph`
-blocks for groups. ER roots render to a `classDiagram`. Parsing (`extract_graph`)
-reads either dialect back into the neutral `structlint.Graph`, so `lint_text`
-works against Mermaid output the same way it does for any backend.
+blocks for groups. ER roots render to an `erDiagram` with crow's-foot relations,
+giving a SQL-table look. Parsing (`extract_graph`) reads `flowchart`, `erDiagram`,
+and `classDiagram` back into the neutral `structlint.Graph`, so `lint_text` works
+against Mermaid output the same way it does for any backend.
 
 Mermaid connects entity-to-entity rather than column-to-column, so field-level
 edges degrade to entity edges with the field name carried in the relation label.
@@ -41,17 +42,20 @@ FLOWCHART_DIRECTION: dict[str, str] = {
 }
 DEFAULT_FLOWCHART_DIRECTION = "TD"
 
-# ER direction -> Mermaid classDiagram orientation token.
-CLASSDIAGRAM_DIRECTION: dict[str, str] = {
-    "down": "TB",
-    "up": "BT",
-    "right": "LR",
-    "left": "RL",
-}
-DEFAULT_CLASSDIAGRAM_DIRECTION = "LR"
-
-COMPUTED_MARKER = "_computed"
 DEFAULT_ATTR_TYPE = "any"
+
+# Crow's-foot relationship tokens for erDiagram, parent (container) on the LEFT.
+ER_CARD_ONE = "||--||"  # exactly one
+ER_CARD_ZERO_OR_ONE = "||--o|"  # optional one
+ER_CARD_MANY = "||--o{"  # zero or many
+ER_CROWFOOT: dict[str, str] = {
+    "1": ER_CARD_ONE,
+    "0..1": ER_CARD_ZERO_OR_ONE,
+    "*": ER_CARD_MANY,
+}
+ER_CROWFOOT_DEFAULT = ER_CARD_MANY
+# erDiagram attribute comment marking a Pydantic computed (derived) field.
+ER_COMPUTED_COMMENT = "computed"
 
 _ID_SANITIZE_RE = re.compile(r"[^A-Za-z0-9_]")
 _ATTR_TYPE_SANITIZE_RE = re.compile(r"[^A-Za-z0-9_~]")
@@ -74,6 +78,14 @@ _CLASS_REL_RE = re.compile(
     r"[<|o*]*(?:--|\.\.)[|>o*]*\s*"  # relation connector with optional arrowheads
     r'(?:"[^"]*"\s*)?'  # optional cardinality label
     r"([A-Za-z0-9_]+)"  # target class
+)
+
+# An erDiagram entity header and crow's-foot relationship line.
+_ER_ENTITY_DECL_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\s*\{")
+_ER_REL_RE = re.compile(
+    r"^([A-Za-z_][A-Za-z0-9_]*)\s+"  # left (parent) entity
+    r"[|o{}]+--[|o{}]+\s+"  # crow's-foot relationship operator
+    r"([A-Za-z_][A-Za-z0-9_]*)\s*:"  # right (referenced) entity, then label
 )
 
 _FLOW_SKIP_PREFIXES: tuple[str, ...] = (
@@ -198,25 +210,24 @@ class MermaidBackend(RenderBackend):
     ) -> str:
         models = _closure(roots)
         in_scope = set(models)
-        token = CLASSDIAGRAM_DIRECTION.get(direction, DEFAULT_CLASSDIAGRAM_DIRECTION)
-        out: list[str] = ["classDiagram", f"  direction {token}", ""]
+        out: list[str] = ["erDiagram", ""]
 
         for model in models:
-            out.append(f"  class {model.__name__} {{")
+            out.append(f"  {model.__name__} {{")
             for view in entity_fields(model):
                 attr = _attr_type(type_str(view.annotation))
                 if view.computed:
-                    attr += COMPUTED_MARKER
-                out.append(f"    +{attr} {view.name}")
+                    out.append(f'    {attr} {view.name} "{ER_COMPUTED_COMMENT}"')
+                else:
+                    out.append(f"    {attr} {view.name}")
             out.append("  }")
         out.append("")
 
         for model in models:
             for name, ref, card in _field_refs(model):
                 if ref in in_scope:
-                    out.append(
-                        f'  {model.__name__} --> "{card}" {ref.__name__} : {name}'
-                    )
+                    crow = ER_CROWFOOT.get(card, ER_CROWFOOT_DEFAULT)
+                    out.append(f'  {model.__name__} {crow} {ref.__name__} : "{name}"')
 
         return "\n".join(out) + "\n"
 
@@ -225,6 +236,8 @@ class MermaidBackend(RenderBackend):
             stripped = line.strip()
             if not stripped:
                 continue
+            if stripped.startswith("erDiagram"):
+                return self._extract_erdiagram(text)
             if stripped.startswith("classDiagram"):
                 return self._extract_classdiagram(text)
             if stripped.startswith(("flowchart", "graph")):
@@ -284,6 +297,31 @@ class MermaidBackend(RenderBackend):
                     brace_depth += 1
                 continue
             rel_match = _CLASS_REL_RE.match(line)
+            if rel_match:
+                edges.append(
+                    structlint.Edge(src=rel_match.group(1), dst=rel_match.group(2))
+                )
+        return structlint.Graph(nodes=nodes, containers=set(), edges=edges)
+
+    def _extract_erdiagram(self, text: str) -> structlint.Graph:
+        nodes: set[str] = set()
+        edges: list[structlint.Edge] = []
+        brace_depth = 0
+        for line in text.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if brace_depth > 0:
+                if "}" in stripped:
+                    brace_depth -= 1
+                continue
+            entity_match = _ER_ENTITY_DECL_RE.match(stripped)
+            if entity_match:
+                nodes.add(entity_match.group(1))
+                if not stripped.endswith("}"):
+                    brace_depth += 1
+                continue
+            rel_match = _ER_REL_RE.match(stripped)
             if rel_match:
                 edges.append(
                     structlint.Edge(src=rel_match.group(1), dst=rel_match.group(2))
