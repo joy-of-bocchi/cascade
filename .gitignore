@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+*.svg
+*.png
+*.view.html
+.DS_Store
+.claude/
