@@ -1,10 +1,36 @@
 # Cascade
 
-A discipline and toolkit for **single-source-of-truth, reactive typed dataflows**: model a pipeline as frozen Pydantic entities where every value is defined once and derived through a DAG, so changing one value recomputes everything downstream — and project that pipeline into smooth, infinitely-zoomable D2 diagrams (auto-generated ER + hand-authored decision trees). Generation and viewing stay separate from a set of linters that enforce the structural properties.
+A discipline and toolkit for **single-source-of-truth, reactive typed dataflows**: model a pipeline as frozen Pydantic entities where every value is defined once and derived through a DAG, so changing one value recomputes everything downstream — then project that pipeline into a diagram (auto-generated ER + hand-authored decision trees). One typed source renders to two backends, Mermaid or D2. Mermaid is the default; D2 is the precision option. Generation and viewing stay separate from a set of linters that enforce the structural properties.
+
+## The seam: one spec, two backends
+
+The source of truth is a `DiagramSpec` — a typed graph of model / decision / terminal nodes, edges, and groups (in `d2spec.py`). A `RenderBackend` turns that spec into diagram text and reports how to rasterize it to SVG:
+
+```
+DiagramSpec ──► RenderBackend.render_spec ──► diagram text ──► SVG
+   (typed)        (Mermaid or D2)               (.mmd / .d2)
+```
+
+`structlint.py` validates the graph regardless of backend: each backend parses its own rendered text back into a shared `structlint.Graph`, and the cycle / dangling-edge / isolated-node checks run on that neutral graph. Switch backends and the structural guarantees still hold; the only thing that changes is the syntax and what the syntax can express.
+
+Render through the neutral surface in `render.py`:
+
+```python
+from render import render, render_er, lint, get_backend
+from backends import D2Backend
+
+render(spec)                       # Mermaid (the default)
+render(spec, D2Backend())          # D2, by explicit backend
+render(spec, get_backend("d2"))    # D2, by name
+render_er([RootModel])             # Mermaid classDiagram from Pydantic roots
+lint(render(spec))                 # structural report on the rendered text
+```
+
+`build_d2(spec)` (in `d2gen.py`) and `build_er_d2(roots)` (in `d2er.py`) remain as explicit D2 entry points for callers that always want `.d2`.
 
 ## Diagrams: fast and infinitely zoomable
 
-D2 (`terrastruct/d2`, `brew install d2`) turns text into diagrams: vector SVG out, plain-text source in. Two authoring/viewing choices decide whether the result is smooth and deep-zoomable or a stuttering mess. Get them right and a 1000-node diagram pans like a map; get them wrong and it janks even when small. Everything below is the distilled rule set.
+D2 (`terrastruct/d2`, `brew install d2`) turns text into diagrams: vector SVG out, plain-text source in. On the D2 path, two authoring/viewing choices decide whether the result is smooth and deep-zoomable or a stuttering mess. Get them right and a 1000-node diagram pans like a map; get them wrong and it janks even when small. The performance and authoring rules below are the distilled rule set for that path.
 
 ## Intent — why any of this exists (read first)
 
@@ -51,12 +77,42 @@ A value is **carried downstream by nesting the frozen entity** (`enriched.order.
 
 The ER is *derived* from the models; the decision tree is *authored* (the branching logic lives in the code, not the type graph). The lints guard both; only the ER is generated. Don't try to auto-derive the decision tree from types, and don't hand-maintain the ER — let each come from its right source.
 
-## When to reach for D2 vs Mermaid
+## Default to Mermaid; reach for D2 when you need its precision
 
-- **D2** when nodes must *be* typed tables (a model sitting as a node inside a decision DAG), when you need nested containers ("deep modules"), or one language across decision-tree + ER + pipeline. The deciding question: does a typed table need to sit as a node inside a flowchart? Yes → D2.
-- **Mermaid** when you need inline rendering in GitHub / Notion / Obsidian with zero tooling, or an agent must author it reliably (far more training data). Mermaid `flowchart` nodes cannot be typed tables and its diagram types don't mix — that's exactly the gap D2 fills.
+Mermaid is the default backend. It renders inline on GitHub and in most markdown tooling, runs client-side with no binary to install before you can look at it, and is the more ubiquitous format (so an agent authors it from far more training data). `render(spec)`, `render_er(roots)`, and `lint(text)` all default to Mermaid. Reach for D2 when you need a capability Mermaid can't express: column-level FK edges, faithful `sql_table` rendering, or boards / drill-down.
 
-## The two decisions that determine performance (read first)
+The two backends share the same `DiagramSpec`. Where Mermaid can't match a capability it degrades rather than failing, so the choice is about fidelity, not whether the diagram renders at all.
+
+| capability | Mermaid (default) | D2 (`get_backend("d2")` / `D2Backend()`) |
+|---|---|---|
+| inline render in GitHub / markdown | yes, native | no — needs the `d2` binary or a viewer |
+| field-level / column FK edges (`tableA.col -> tableB.col`) | no — degrades to an entity-to-entity edge with the field name in the relation label | yes, via `sql_table` |
+| model tables with typed field rows | approximated — `flowchart` packs the fields into a `<br/>`-joined list inside the node; `classDiagram` shows `+type field` rows with type strings flattened to safe tokens | yes, faithful `sql_table` |
+| model boxes + decision diamonds in one diagram | yes, in one `flowchart` | yes, in one graph |
+| boards / layers / drill-down (click a box into a sub-canvas) | no | yes |
+| decision-node rationale as a tooltip | no — dropped from the visual | yes, via `tooltip:` |
+| in-place expand/collapse with reflow | no (see below) | no (see below) |
+| hot-reload viewing | mermaid.js re-rendering in a page | `d2 --watch` |
+| layout engine | dagre / elk | dagre / elk (this toolkit uses elk) |
+| structural linting (cycle / dangling-edge / isolated-node) | yes | yes |
+
+Switching is a backend argument, never a rewrite of the spec:
+
+```python
+render(spec)                     # Mermaid
+render(spec, D2Backend())        # D2 (explicit constructor)
+render(spec, get_backend("d2"))  # D2 (by name)
+```
+
+The deciding question: does a typed table need to sit as a node inside a flowchart, do you need column-level FK edges, or do you need drill-down boards? Any yes → D2. Otherwise Mermaid, and you get inline rendering for free.
+
+### What neither backend does: in-place expand/collapse
+
+Both backends are compile-time static renderers: spec in, finished diagram text out. Neither expands or collapses a node *in place* with live reflow. Mermaid can fake it only by re-running its own layout client-side (mermaid.js re-rendering the whole diagram); the real tool for interactive expand/collapse with reflow is a runtime graph library (Cytoscape.js with `expand-collapse`, or similar). If you need a box you can click to grow and shrink while the rest of the graph rearranges around it, that's runtime-lib territory, not something either of these backends gives you. D2 boards / drill-down are the nearest static analogue: a click navigates to a coarser or finer board, it doesn't reflow one canvas.
+
+## D2 path: the two decisions that determine performance (read first)
+
+Everything from here through "When even a viewBox canvas is heavy" is D2-path guidance — it applies when you render to `.d2` and view the SVG. The Mermaid path renders inline and doesn't go through these knobs.
 
 1. **Author with native SVG text, not `foreignObject`.** (authoring)
 2. **View via the SVG `viewBox`, not a CSS transform.** (viewer)
@@ -156,22 +212,27 @@ Change propagation: change an upstream value → `model_copy(update=...)` → co
 
 **mypy gotcha:** `@computed_field` stacked on `@property` trips mypy's `[prop-decorator]` on every computed field. Add `disable_error_code = prop-decorator` to your mypy config (it's spurious for this pattern); the real errors then surface cleanly.
 
-## D2 is cosmetic — validate elsewhere
+## Renderers are cosmetic — validate elsewhere
 
-D2 renders; it does not check. It will draw a cycle, an FK to a missing PK, or a box that disagrees with the real model without complaint. If the diagram is the source of truth for a typed DAG, validate it — but keep validation a *separate concern* from generation and viewing. Determinism works wherever structure is explicit (graph checks, model introspection, declared-group collapse); grouping and fidelity-level are judgment — keep them declared in the source or decided by the model, not inferred by heuristics.
+Neither backend checks anything. Each will draw a cycle, an FK to a missing PK, or a box that disagrees with the real model without complaint. If the diagram is the source of truth for a typed DAG, validate it — but keep validation a *separate concern* from generation and viewing. Determinism works wherever structure is explicit (graph checks, model introspection, declared-group collapse); grouping and fidelity-level are judgment — keep them declared in the source or decided by the model, not inferred by heuristics.
 
-**Generation/viewing and linting are separate, by design.** The toolkit is split so the two concerns never sit on one pipeline:
+**Rendering, viewing, and linting are separate, by design.** The toolkit is split so the concerns never sit on one pipeline:
 
 ```
-shared substrate     d2spec.py    typed spec (DiagramSpec/nodes/edges) + introspection helpers; neutral
-generation + viewing d2gen.py     build_d2(spec) -> .d2  — HAND-AUTHORED decision tree w/ inline model tables
-                     d2er.py      build_er_d2(roots) -> .d2  — AUTO ER from real models (transitive closure)
-                     wrap.py      svg -> infinite pan/zoom .view.html
-linting              speclint.py  validate(spec): cycle / frozen / referential / type-flow
-                     d2lint.py    structural checks on a .d2 file (cycle/dangling/isolated)
-                     decllint.py  single-declaration: each field declared on ONE model (inheritance-aware)
-                     namelint.py  one-name + provenance via an explicit canonical registry
+shared substrate     d2spec.py     typed spec (DiagramSpec/nodes/edges) + introspection helpers; neutral
+rendering            render.py     neutral surface: render / render_er / lint / get_backend (defaults to Mermaid)
+                     backends/     base.py (the RenderBackend seam) + mermaid.py + d2.py
+                     d2gen.py      build_d2(spec) -> .d2  — explicit-D2 HAND-AUTHORED decision tree w/ inline model tables
+                     d2er.py       build_er_d2(roots) -> .d2  — explicit-D2 AUTO ER from real models (transitive closure)
+                     wrap.py       svg -> infinite pan/zoom .view.html (D2 viewing path)
+linting              structlint.py renderer-neutral graph checks (cycle/dangling/isolated, Tarjan + Kahn)
+                     speclint.py   validate(spec): cycle / frozen / referential / type-flow
+                     d2lint.py     structural checks on a .d2 file via the D2 backend (cycle/dangling/isolated)
+                     decllint.py   single-declaration: each field declared on ONE model (inheritance-aware)
+                     namelint.py   one-name + provenance via an explicit canonical registry
 ```
+
+`structlint` is the renderer-neutral core: each backend parses its own output into a `structlint.Graph` and the same checks run. `d2lint.py` is the `.d2`-file CLI front end over it; `lint(text)` in `render.py` does the same for whichever backend rendered the text.
 
 **`decllint.py` is the minimal, type-first name discipline — prefer it.** `check_single_declaration(models)` introspects the models and flags any field name *declared* on more than one class (attributing each field to the class in its MRO that actually declares it, so inheriting a field counts once, re-declaring it counts twice). That single check enforces both **defined-once-carried-down** (a value lives on one model; downstream nests or inherits it, never re-declares it) and **one-name-per-quantity** (the same name on two unrelated models = one name used for two things). No registry to maintain. `namelint.py` is the heavier alternative when you want an *explicit* canonical registry with declared `derived_from` provenance; reach for it only if you need provenance the models don't already encode via `@computed_field` / factory signatures. It passes on nesting and inheritance, and fails on a re-declared field.
 
