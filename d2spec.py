@@ -15,7 +15,7 @@ from enum import StrEnum
 from types import UnionType
 from typing import Annotated, Any, Literal, Union, get_args, get_origin, get_type_hints
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic.fields import FieldInfo
 
 NONE_TYPE = type(None)
@@ -45,14 +45,21 @@ class NodeRole(StrEnum):
     MINTED = "minted"
     DECISION = "decision"
     TERMINAL = "terminal"
+    MODULE = "module"
 
 
 class ModelNode(BaseModel):
+    """A payload card: the introspected field table of one entity, optionally
+    enriched with an authored role sentence (`prose` — who writes it, who reads
+    it, when) and per-field `notes` that fill the table's note column."""
+
     model_config = ConfigDict(arbitrary_types_allowed=True)
     kind: Literal["model"] = "model"
     id: str
     model: type
     role: NodeRole = NodeRole.MODEL
+    prose: str = ""
+    notes: dict[str, str] = Field(default_factory=dict)
     group: str | None = None
 
     @field_validator("model")
@@ -67,6 +74,9 @@ class ModelNode(BaseModel):
 
 
 class DecisionNode(BaseModel):
+    """A decision. With a `rationale`, both backends render the DECIDES/WHY text
+    inline in the node; without one, the node is a plain short-question diamond."""
+
     kind: Literal["decision"] = "decision"
     id: str
     question: str
@@ -81,6 +91,18 @@ class TerminalNode(BaseModel):
     group: str | None = None
 
 
+class ModuleNode(BaseModel):
+    """A collapsed neighboring subsystem drawn only as its boundary: a name,
+    what it is (`prose`), and the products it hands the rest of the pipeline."""
+
+    kind: Literal["module"] = "module"
+    id: str
+    label: str
+    prose: str = ""
+    products: list[str] = Field(default_factory=list)
+    group: str | None = None
+
+
 class Edge(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
     src: str
@@ -91,19 +113,26 @@ class Edge(BaseModel):
 
 
 class Group(BaseModel):
+    """A stage container. With a `cadence` ("once per report", "per case") the
+    backends render the header as `STAGE: <label> — <cadence>`."""
+
     id: str
     label: str
+    cadence: str = ""
 
 
-AnyNode = Annotated[ModelNode | DecisionNode | TerminalNode, "kind"]
+AnyNode = Annotated[ModelNode | DecisionNode | TerminalNode | ModuleNode, "kind"]
 
 
 class DiagramSpec(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
-    nodes: list[ModelNode | DecisionNode | TerminalNode]
+    nodes: list[ModelNode | DecisionNode | TerminalNode | ModuleNode]
     edges: list[Edge] = []
     groups: list[Group] = []
     direction: str = "down"
+    # Reachability roots for the connectivity lint (external inputs / the entry).
+    # Empty means: every node with edge in-degree zero counts as a root.
+    roots: list[str] = Field(default_factory=list)
 
 
 def type_str(annotation: Any) -> str:

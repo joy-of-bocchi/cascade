@@ -22,6 +22,7 @@ from d2spec import (
     DecisionNode,
     DiagramSpec,
     ModelNode,
+    ModuleNode,
     NodeRole,
     TerminalNode,
     entity_fields,
@@ -45,6 +46,11 @@ ROLE_STYLE: dict[NodeRole, dict[str, str]] = {
         "fill": "#3a2020",
         "stroke": "#8f4a3f",
         "font-color": "#f5cfc9",
+    },
+    NodeRole.MODULE: {
+        "fill": "#2b2f37",
+        "stroke": "#555c66",
+        "font-color": "#aab3bf",
     },
 }
 
@@ -74,18 +80,18 @@ def _q(text: str) -> str:
     )
 
 
-def model_table(node: ModelNode) -> list[str]:
-    model = node.model
-    frozen = " (frozen)" if is_frozen(model) else ""
+def model_table_rows(node: ModelNode) -> list[str]:
+    """The aligned field/type/default/note rows for a payload card. Authored
+    `notes` take the note column; a field's schema description is the fallback."""
     header = ["field", "type", "default", "note"]
     rows: list[list[str]] = [header]
-    for view in entity_fields(model):
+    for view in entity_fields(node.model):
         rows.append(
             [
                 view.name,
                 type_str(view.annotation),
                 view.default,
-                view.description,
+                node.notes.get(view.name, view.description),
             ]
         )
     widths = [max(len(row[col]) for row in rows) for col in range(len(header))]
@@ -99,7 +105,16 @@ def model_table(node: ModelNode) -> list[str]:
         ]
         return "".join(cells).rstrip()
 
-    return [f"{model.__name__}{frozen}", *(fmt(row) for row in rows)]
+    return [fmt(row) for row in rows]
+
+
+def model_title(node: ModelNode) -> str:
+    frozen = " (frozen)" if is_frozen(node.model) else ""
+    return f"{node.model.__name__}{frozen}"
+
+
+def model_table(node: ModelNode) -> list[str]:
+    return [model_title(node), *model_table_rows(node)]
 
 
 def _referenced(annotation: Any) -> list[tuple[type, str]]:
@@ -172,38 +187,68 @@ class D2Backend(RenderBackend):
             NodeRole.DECISION,
             NodeRole.TERMINAL,
         }
+        if any(isinstance(n, ModuleNode) for n in spec.nodes):
+            used_roles.add(NodeRole.MODULE)
         for role in NodeRole:
             if role not in used_roles:
                 continue
             style = ROLE_STYLE[role]
-            head = "shape: diamond; " if role is NodeRole.DECISION else ""
             decls = "; ".join(f'{key}: "{value}"' for key, value in style.items())
-            out.append(f"  {role}: {{ {head}style: {{ {decls} }} }}")
+            out.append(f"  {role}: {{ style: {{ {decls} }} }}")
         out.append("}")
         out.append("")
 
         for group in spec.groups:
-            out.append(f'{group.id}.label: "{_q(group.label)}"')
+            label = (
+                f"STAGE: {group.label} — {group.cadence}"
+                if group.cadence
+                else group.label
+            )
+            out.append(f'{group.id}.label: "{_q(label)}"')
         if spec.groups:
             out.append("")
 
-        def qual(node: ModelNode | DecisionNode | TerminalNode) -> str:
+        def qual(node: ModelNode | DecisionNode | TerminalNode | ModuleNode) -> str:
             return f"{node.group}.{node.id}" if node.group else node.id
 
         for node in spec.nodes:
             ref = qual(node)
             if isinstance(node, ModelNode):
-                out.append(f"{ref}: |`{CODE_LANG}")
-                out.extend(model_table(node))
-                out.append("`|")
-                out.append(f"{ref}.class: {node.role}")
+                if node.prose:
+                    # Payload card: container label carries the name; the role
+                    # sentence and the field table are native-text children.
+                    out.append(f'{ref}: "{_q(model_title(node))}" {{')
+                    out.append(f"  class: {node.role}")
+                    out.append(f'  role: "{_q(node.prose)}"')
+                    out.append(f"  fields: |`{CODE_LANG}")
+                    out.extend(f"  {row}" for row in model_table_rows(node))
+                    out.append("  `|")
+                    out.append("}")
+                else:
+                    out.append(f"{ref}: |`{CODE_LANG}")
+                    out.extend(model_table(node))
+                    out.append("`|")
+                    out.append(f"{ref}.class: {node.role}")
             elif isinstance(node, DecisionNode):
-                out.append(f'{ref}: "{_q(node.question)}" {{')
-                out.append("  shape: diamond")
-                out.append(f"  class: {NodeRole.DECISION}")
                 if node.rationale:
-                    out.append(f'  tooltip: "{_q(node.rationale)}"')
-                out.append("}")
+                    # Inline rationale: a rect holds multi-line text; a diamond
+                    # would stretch it into an unreadable sliver.
+                    text = f"DECIDES: {node.question}\nWHY: {node.rationale}"
+                    out.append(f'{ref}: "{_q(text)}"')
+                    out.append(f"{ref}.class: {NodeRole.DECISION}")
+                else:
+                    out.append(f'{ref}: "{_q(node.question)}" {{')
+                    out.append("  shape: diamond")
+                    out.append(f"  class: {NodeRole.DECISION}")
+                    out.append("}")
+            elif isinstance(node, ModuleNode):
+                lines = [node.label]
+                if node.prose:
+                    lines.append(node.prose)
+                if node.products:
+                    lines.append("gives: " + " · ".join(node.products))
+                out.append(f'{ref}: "{_q(chr(10).join(lines))}"')
+                out.append(f"{ref}.class: {NodeRole.MODULE}")
             else:
                 out.append(f'{ref}: "{_q(node.label)}"')
                 out.append(f"{ref}.class: {NodeRole.TERMINAL}")

@@ -11,8 +11,8 @@ against Mermaid output the same way it does for any backend.
 
 Mermaid connects entity-to-entity rather than column-to-column, so field-level
 edges degrade to entity edges with the field name carried in the relation label.
-Decision rationale has no faithful flowchart home, so it is omitted from the
-visual.
+A decision with a rationale renders it inline (`DECIDES: ... / WHY: ...`) in the
+rhombus; payload cards carry the role sentence and an HTML field table.
 """
 
 from __future__ import annotations
@@ -27,9 +27,11 @@ from d2spec import (
     DecisionNode,
     DiagramSpec,
     ModelNode,
+    ModuleNode,
     NodeRole,
     TerminalNode,
     entity_fields,
+    is_frozen,
     type_str,
 )
 
@@ -133,10 +135,39 @@ def _attr_type(rendered: str) -> str:
 
 
 def _model_label(node: ModelNode) -> str:
-    """The flowchart box label: bold model name, then one field per line."""
-    parts: list[str] = [f"<b>{_esc(node.model.__name__)}</b>"]
+    """The payload-card label: bold title, the authored role sentence, then the
+    full field table (field / type / note) with authored notes in the note
+    column and the schema description as fallback."""
+    frozen = " (frozen)" if is_frozen(node.model) else ""
+    parts: list[str] = [f"<b>{_esc(node.model.__name__)}{frozen}</b>"]
+    if node.prose:
+        parts.append(f"<i>{_esc(node.prose)}</i>")
+    rows: list[str] = []
     for view in entity_fields(node.model):
-        parts.append(f"{_esc(view.name)}: {_esc(type_str(view.annotation))}")
+        note = node.notes.get(view.name, view.description)
+        rows.append(
+            "<tr>"
+            f"<td>{_esc(view.name)}</td>"
+            f"<td>{_esc(type_str(view.annotation))}</td>"
+            f"<td>{_esc(note)}</td>"
+            "</tr>"
+        )
+    parts.append("<table>" + "".join(rows) + "</table>")
+    return "<br/>".join(parts)
+
+
+def _decision_label(node: DecisionNode) -> str:
+    if node.rationale:
+        return f"DECIDES: {_esc(node.question)}<br/>WHY: {_esc(node.rationale)}"
+    return _esc(node.question)
+
+
+def _module_label(node: ModuleNode) -> str:
+    parts: list[str] = [f"<b>{_esc(node.label)}</b>"]
+    if node.prose:
+        parts.append(_esc(node.prose))
+    if node.products:
+        parts.append("gives: " + _esc(" · ".join(node.products)))
     return "<br/>".join(parts)
 
 
@@ -147,14 +178,16 @@ class MermaidBackend(RenderBackend):
     supports_mixed_model_and_decision = True
 
     def _declare(
-        self, node: ModelNode | DecisionNode | TerminalNode
+        self, node: ModelNode | DecisionNode | TerminalNode | ModuleNode
     ) -> tuple[str, str, NodeRole]:
         """Return the (sanitized id, declaration line, role) for one node."""
         nid = _nid(node.id)
         if isinstance(node, ModelNode):
             return nid, f'{nid}["{_model_label(node)}"]', node.role
         if isinstance(node, DecisionNode):
-            return nid, f'{nid}{{"{_esc(node.question)}"}}', NodeRole.DECISION
+            return nid, f'{nid}{{"{_decision_label(node)}"}}', NodeRole.DECISION
+        if isinstance(node, ModuleNode):
+            return nid, f'{nid}[["{_module_label(node)}"]]', NodeRole.MODULE
         return nid, f'{nid}(["{_esc(node.label)}"])', NodeRole.TERMINAL
 
     def render_spec(self, spec: DiagramSpec) -> str:
@@ -175,7 +208,12 @@ class MermaidBackend(RenderBackend):
 
         for group in spec.groups:
             gid = _nid(group.id)
-            out.append(f'  subgraph {gid}["{_esc(group.label)}"]')
+            label = (
+                f"STAGE: {group.label} — {group.cadence}"
+                if group.cadence
+                else group.label
+            )
+            out.append(f'  subgraph {gid}["{_esc(label)}"]')
             for decl in members_by_group.get(group.id, []):
                 out.append(f"    {decl}")
             out.append("  end")

@@ -145,7 +145,7 @@ Code-block language tag: use `txt` (or `none` / `plain`) for clean monospace wit
 - **Backtick-fence any block whose content contains `|`.** A single-pipe fence (`` |txt … | `` or `` |md … | ``) is closed by the *first* `|` in the content — and union types (`float | None`) and markdown tables are full of pipes. Open with `` |`txt `` (pipe-backtick-lang) and close with `` `| `` (backtick-pipe).
 - **Escape `$` → `\$` in quoted labels.** A bare `$` triggers D2's `${}` substitution and the file fails to compile (`substitutions must begin on {`).
 - **No `"` inside a quoted label** — swap to `'`.
-- **Diamonds: short label + `tooltip:`.** Put only the question in the decision node; move any rationale to `tooltip: "..."`. A multi-line diamond label stretches into an unreadable flat sliver and bloats the canvas.
+- **Diamonds: short label + `tooltip:` — unless the rationale must read inline.** A multi-line diamond label stretches into an unreadable flat sliver and bloats the canvas. When hand-writing `.d2`, keep the question in the diamond and rationale in `tooltip:`. On the spec path, a `DecisionNode` with a `rationale` renders as a gold **rect** carrying `DECIDES: <question> \n WHY: <rationale>` inline (rect geometry holds multi-line native text; the semantic "diamond" is the color class, not the rhombus) — that is the object-view format, where rationale hidden in a tooltip defeats the point.
 - **Default to `--layout elk`** for anything non-trivial (see Layout engine below).
 
 ## Authoring rule 3: every hand-authored edge must be caller-verified
@@ -259,7 +259,17 @@ PYTHONPATH=<skill_dir> uv run --with pydantic python3 <skill_dir>/demo_backends.
 
 `d2gen` imports no linter and no linter imports `d2gen`; both sides depend only on `d2spec`. Lint a spec when you want to — generation never invokes a linter, and a linter never generates. (Run order is the caller's choice: typically `validate(spec)` then `build_d2(spec)`, but they're independent calls.)
 
-**`speclint.py`** — `validate(spec)` runs the spec-level checks: **cycle**, **frozen** (every model node `frozen=True`), **referential** (edge/group references resolve), **type-flow** (a declared edge payload must be producible by the source model). In-degree > 1 is fine — a join/fan-in is normal in a dataflow DAG — so there is no single-producer check; `frozen` + `acyclic` + `type-flow` are the pipeline invariants.
+**`speclint.py`** — `validate(spec)` runs the spec-level checks: **cycle**, **frozen** (every model node `frozen=True`), **referential** (edge/group references resolve), **type-flow** (a declared edge payload must be producible by the source model), and **reachability** (every node connects — over the undirected graph, so dashed dormant markers count as attached — to a root from `spec.roots`, or to a zero-in-degree node when no roots are declared; floating islands FAIL: connect them with a cited edge or cut them). In-degree > 1 is fine — a join/fan-in is normal in a dataflow DAG — so there is no single-producer check.
+
+### Object-view spec types (the decisions-and-payloads format)
+
+The spec carries an authored judgment layer on top of the introspected facts, and both backends render all of it — nothing is stripped:
+
+- `DecisionNode(question, rationale)` — with a `rationale`, renders inline `DECIDES:/WHY:` (Mermaid: in the rhombus; D2: as a gold rect). Without one: a plain short-question diamond.
+- `ModelNode(model, prose, notes)` — a payload card: bold title, the authored role sentence (`prose` — who writes it, who reads it, when), and the **full introspected field table** with authored `notes` filling the note column (schema `description` is the fallback). Mermaid renders an HTML table; D2 renders a container with a native-text `txt` block, staying out of `foreignObject`.
+- `ModuleNode(label, prose, products)` — a collapsed neighboring subsystem drawn only as its boundary and the products it hands on.
+- `Group(label, cadence)` — a stage container; with a cadence the header reads `STAGE: <label> — <cadence>`.
+- `DiagramSpec.roots` — the reachability roots for the connectivity gate above.
 
 **`d2gen.py`** — the *hand-authored decision-tree* side. `build_d2(spec)` only; each model node's table is introspected from `model_fields`, so a box can't disagree with its class, but the graph (decisions, edges, grouping) is authored because the control logic isn't in the types.
 
