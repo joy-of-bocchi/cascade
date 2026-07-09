@@ -28,6 +28,12 @@ lint(render(spec))                 # structural report on the rendered text
 
 `build_d2(spec)` (in `d2gen.py`) and `build_er_d2(roots)` (in `d2er.py`) remain as explicit D2 entry points for callers that always want `.d2`.
 
+## Registry-to-spec seeding
+
+`specgen.py` turns a typed pipeline registry into a `DiagramSpec` seed. Pass `fragment_from_pipeline(...)` any object with `root_types` and `stages`; each stage can expose `name`, `input_types`, `output_type`, `when`, `section`, `collapse`, `marker`, `question`, `reads_external`, and `sub_pipeline`. Missing optional attributes use neutral defaults, so small registries do not need adapter classes.
+
+Use `merge([fragment], overlay=Overlay(...), extra=AuthoredExtra(...))` to combine the seeded graph with authored nodes, edges, prose, notes, and group cadence overrides. Merge checks stale overlay keys, duplicate ids, dangling references, and authored model-to-model edges that need `intra_stage=True`.
+
 ## Diagrams: fast and infinitely zoomable
 
 D2 (`terrastruct/d2`, `brew install d2`) turns text into diagrams: vector SVG out, plain-text source in. On the D2 path, two authoring/viewing choices decide whether the result is smooth and deep-zoomable or a stuttering mess. Get them right and a 1000-node diagram pans like a map; get them wrong and it janks even when small. The performance and authoring rules below are the distilled rule set for that path.
