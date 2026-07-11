@@ -34,6 +34,44 @@ lint(render(spec))                 # structural report on the rendered text
 
 Use `merge([fragment], overlay=Overlay(...), extra=AuthoredExtra(...))` to combine the seeded graph with authored nodes, edges, prose, notes, and group cadence overrides. Merge checks stale overlay keys, duplicate ids, dangling references, and authored model-to-model edges that need `intra_stage=True`.
 
+## Engine
+
+`engine.py` is the executable version of that registry shape. Define frozen Pydantic models, register typed stage functions, then call `build()` to validate and topologically sort the pipeline:
+
+```python
+from pydantic import BaseModel, ConfigDict
+
+from engine import Pipeline, run
+from specgen import fragment_from_pipeline
+
+
+class Root(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    value: int
+
+
+class Derived(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    value: int
+
+
+pipeline = Pipeline(root_types=(Root,), cadence="daily")
+
+
+@pipeline.stage(output=Derived, section="Derive")
+def derive(root: Root) -> Derived:
+    return Derived(value=root.value + 1)
+
+
+built = pipeline.build()
+result = run(built, {Root: Root(value=1)})
+fragment = fragment_from_pipeline(built, "example")
+```
+
+Stage inputs come from function annotations. Each parameter must be a Pydantic model type, `list[Model]`, or `tuple[Model, ...]`; the engine pulls those types from the run store, calls stages in dependency order, and refuses to overwrite an existing type. Use `when=` for gated stages, `include(...)` to nest another pipeline as one stage, and an optional snapshot sink with `on_stage(stage_name, inputs, output)` to observe successful stage outputs.
+
 ## Diagrams: fast and infinitely zoomable
 
 D2 (`terrastruct/d2`, `brew install d2`) turns text into diagrams: vector SVG out, plain-text source in. On the D2 path, two authoring/viewing choices decide whether the result is smooth and deep-zoomable or a stuttering mess. Get them right and a 1000-node diagram pans like a map; get them wrong and it janks even when small. The performance and authoring rules below are the distilled rule set for that path.
