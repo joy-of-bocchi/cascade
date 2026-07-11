@@ -273,10 +273,33 @@ linting              structlint.py renderer-neutral graph checks (cycle/dangling
                      speclint.py   validate(spec): cycle / frozen / referential / type-flow
                      d2lint.py     structural checks on a .d2 file via the D2 backend (cycle/dangling/isolated)
                      decllint.py   single-declaration: each field declared on ONE model (inheritance-aware)
+                     carrylint.py  a bare carry keeps its name: C(speed=o.velocity) FAILs (AST)
+                     derivlint.py  one derivation per value: same fingerprint at two sites FAILs (AST)
                      namelint.py   one-name + provenance via an explicit canonical registry
+vocabulary           vocab.py      generated canonical name registry from model_fields (TSV artifact + diff)
+run view             rundump.py    dump_run/dump_store: every field, value, producer stage, status
 ```
 
 `structlint` is the renderer-neutral core: each backend parses its own output into a `structlint.Graph` and the same checks run. `d2lint.py` is the `.d2`-file CLI front end over it; `lint(text)` in `render.py` does the same for whichever backend rendered the text.
+
+**One value, one name, one derivation — the layered naming discipline.** The invariant is that a quantity is declared once, never renamed on the way down, and never re-derived. No single check covers that, so it's held in layers, each catching what the previous can't see:
+
+```
+"one value, one name, one derivation"
+      ├── declared once ──────── decllint      field name on ONE model
+      ├── never renamed ───────── carrylint    C(speed=o.velocity) FAILs
+      ├── never re-derived ────── derivlint    same fingerprint twice FAILs
+      │                           + engine     write-once store, duplicate-producer build error
+      ├── name is canonical ───── vocab.py     generated registry; a NEW name in the
+      │                                        diff is the review event ("is `speed`
+      │                                        just `velocity`?") — judgment, not code
+      └── visible/debuggable ──── rundump.py   flat dump: field, value, producer, status
+```
+
+- **`carrylint.py`** — a *bare carry* (a constructor kwarg whose value is an attribute chain, `C(velocity=o.trip.velocity)`, incl. single-assignment aliases) must keep its field name; a renamed carry is a blocking FAIL. Transformations (`speed=o.velocity * dt`) are new quantities and may take new names. Opaque `**kwargs` and positional construction are warned as untraceable — the fence that keeps the checkable dialect honest.
+- **`derivlint.py`** — the same computation must not be *defined* twice. Every derivation expression (constructor kwargs, `computed_field` returns) is normalized — aliases inlined, parameter roots rewritten to their annotated type names — and fingerprinted; one fingerprint at two distinct sites is a blocking FAIL, even across files and under different names. `Order.distance / Order.time` never collides with `Leg.distance / Leg.time` (types are the identity), and commutativity is deliberately not assumed (catches copy-paste re-derivation, not algebra). Numbered field names (`velocity1`) are banned outright.
+- **`vocab.py`** — the canonical name list is *generated*, never maintained: `build_vocabulary(models)` sweeps `model_fields` (owner attributed via decllint's MRO walk, types rendered with the same helper the diagrams use) into a committed `vocabulary.tsv`. `check_stale` keeps it fresh in CI; `diff_names` makes a new name a visible, reviewable PR event — the one moment where the semantic question "is this a new quantity or an alias?" gets asked, by an agent or a human, against a short list with types and descriptions.
+- **`rundump.py`** — the "why is this weird?" view: `dump_run(built, result)` renders every value in the final store one row per field (`Trip.distance  12450.0  load_trip  SUCCESS 0.2ms`), roots first, sub-pipeline producers as `parent/child` paths, and skipped stages with their reasons — a complete, legible account of the run.
 
 **`decllint.py` is the minimal, type-first name discipline — prefer it.** `check_single_declaration(models)` introspects the models and flags any field name *declared* on more than one class (attributing each field to the class in its MRO that actually declares it, so inheriting a field counts once, re-declaring it counts twice). That single check enforces both **defined-once-carried-down** (a value lives on one model; downstream nests or inherits it, never re-declares it) and **one-name-per-quantity** (the same name on two unrelated models = one name used for two things). No registry to maintain. `namelint.py` is the heavier alternative when you want an *explicit* canonical registry with declared `derived_from` provenance; reach for it only if you need provenance the models don't already encode via `@computed_field` / factory signatures. It passes on nesting and inheritance, and fails on a re-declared field.
 
