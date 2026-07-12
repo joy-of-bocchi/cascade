@@ -9,7 +9,7 @@ another Python codebase, and how to re-derive them in another language.
 
 ```
 1. THE DISCIPLINE          markdown, language-free
-   README.md               the invariants ("one value, one name, one derivation"),
+   docs/INTENT.md          the invariants ("one value, one name, one derivation"),
    diagram-flow/*.md       the why behind every mechanism, the jurisdiction tree,
                            the run-shaped test, what was deliberately NOT built
 
@@ -97,7 +97,7 @@ same structural lint by parsing its own output, which is how the Python side wor
 A port conforms when:
 
 1. The translated test suite passes.
-2. The invariants in README's intent section hold: values declared once, carried down
+2. The invariants in docs/INTENT.md hold: values declared once, carried down
    unchanged, never re-derived; generation, viewing, and linting stay separate concerns;
    everything mechanical is deterministic and the semantic judgments (is `speed` an
    alias of `velocity`?) are surfaced for review, never encoded as heuristics.

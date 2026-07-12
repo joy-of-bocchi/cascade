@@ -1,7 +1,8 @@
 # Working in this repo
 
 Cascade is a discipline plus a reference toolkit for single-source-of-truth typed
-dataflows. Read `README.md` for what everything is and why; `PORTING.md` for the
+dataflows. Read `README.md` for the quickstart and map; `docs/INTENT.md` for why it is this
+way; `docs/RENDERING.md` for backend and viewing guidance; `PORTING.md` for the
 three-artifact framing (discipline / reference impl / behavioral spec); `DIALECT.md`
 for the source-reading linters' exact rules. This file is only the working rules.
 
@@ -38,7 +39,7 @@ for the source-reading linters' exact rules. This file is only the working rules
 
 - One value, one name, one derivation. A quantity is declared on one model, carried
   down unchanged, never re-derived. The layered enforcement (decllint, carrylint,
-  derivlint, vocab, engine store) is described in README.
+  derivlint, vocab, engine store) is described in docs/INTENT.md.
 - Semantic judgment is never encoded as heuristics. "Is `speed` an alias of
   `velocity`?" gets surfaced as a reviewable diff for a human or model; do not write
   regex/fuzzy-matching/scoring code to decide meaning.
