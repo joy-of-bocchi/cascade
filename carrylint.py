@@ -148,7 +148,8 @@ def _check_unpack(
     if isinstance(expr, ast.Dict) and _has_constant_string_keys(expr):
         violations: list[Violation] = []
         for key, value in zip(expr.keys, expr.values):
-            assert isinstance(key, ast.Constant)
+            if not isinstance(key, ast.Constant):
+                continue
             violation: Violation | None = _classify_kwarg(
                 key.value, value, ctor, params, aliases, path
             )

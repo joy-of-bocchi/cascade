@@ -1,5 +1,7 @@
 # Cascade
 
+> Adopting this in another codebase, or porting it to another language? Read `PORTING.md` (vendor, don't install; the three artifacts) and `DIALECT.md` (the language-neutral spec of the source-reading linters).
+
 A discipline and toolkit for **single-source-of-truth, reactive typed dataflows**: model a pipeline as frozen Pydantic entities where every value is defined once and derived through a DAG, so changing one value recomputes everything downstream — then project that pipeline into a diagram (auto-generated ER + hand-authored decision trees). One typed source renders to two backends, Mermaid or D2. Mermaid is the default; D2 is the precision option. Generation and viewing stay separate from a set of linters that enforce the structural properties.
 
 ## The seam: one spec, two backends
