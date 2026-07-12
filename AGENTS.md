@@ -61,7 +61,9 @@ The tests are the behavioral spec (see PORTING.md): a behavior change without a 
 change is suspect, and a port or refactor conforms when the suite is green. New
 behavior lands with tests in the matching `test_<module>.py`.
 
-## CLAUDE.md
+## CLAUDE.md and per-directory routers
 
 `CLAUDE.md` is a symlink to this file so Claude Code and codex read the same source.
-Edit `AGENTS.md` only.
+Edit `AGENTS.md` only. Every directory carries a short router `AGENTS.md` (with its
+own `CLAUDE.md` symlink) stating what lives there and which law governs it; when you
+add or move a directory, add or update its router.
