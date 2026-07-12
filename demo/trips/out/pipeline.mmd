@@ -1,0 +1,30 @@
+flowchart TD
+  subgraph trips_default["STAGE: trips — per trip"]
+    Trip["<b>Trip (frozen)</b><br/><table><tr><td>trip_code</td><td>str</td><td>Stable generic trip identifier.</td></tr><tr><td>trip_legs</td><td>tuple[Leg, ...]</td><td>Ordered legs in the trip.</td></tr><tr><td>traveler_count</td><td>int</td><td>Number of travelers on the trip.</td></tr><tr><td>needs_manual_approval</td><td>bool</td><td>Whether this trip requires manual approval.</td></tr></table>"]
+  end
+  subgraph trips_Summarize["STAGE: Summarize — per trip"]
+  end
+  subgraph trips_Approve["STAGE: Approve — per trip"]
+    ApprovalPacket["<b>ApprovalPacket (frozen)</b><br/><table><tr><td>approval_summary</td><td>Summary</td><td>Summary used for approval.</td></tr><tr><td>approval_reason</td><td>str</td><td>Reason attached to the approval path.</td></tr></table>"]
+    decision_ApprovalPacket{"Does this trip need manual approval?"}
+  end
+  subgraph trips_Invoice["STAGE: Invoice — per trip"]
+    Invoice["<b>Invoice (frozen)</b><br/><table><tr><td>billing_packet</td><td>ApprovalPacket</td><td>Approval packet used for billing.</td></tr><tr><td>invoice_units</td><td>int</td><td>Number of billable trip legs.</td></tr><tr><td>payable_amount</td><td>float</td><td>Deterministic payable demo amount.</td></tr></table>"]
+  end
+  subgraph trips_summarize_trip_default["STAGE: trips_summarize_trip — per trip"]
+  end
+  subgraph trips_summarize_trip_Summarize["STAGE: Summarize — per trip"]
+    Summary["<b>Summary (frozen)</b><br/><i>Aggregates the trip legs before approval and billing.</i><br/><table><tr><td>trip</td><td>Trip</td><td>Trip summarized by the pipeline.</td></tr><tr><td>total_miles</td><td>float</td><td>Total distance across all legs.</td></tr><tr><td>total_hours</td><td>float</td><td>Total elapsed hours across all legs.</td></tr><tr><td>average_velocity</td><td>float</td><td>Total miles divided by total hours.</td></tr></table>"]
+  end
+  Summary --> decision_ApprovalPacket
+  decision_ApprovalPacket -->|"prepare_manual_approval"| ApprovalPacket
+  decision_ApprovalPacket -->|"prepare_auto_approval"| ApprovalPacket
+  ApprovalPacket -.->|"create_invoice (absent when gated out)"| Invoice
+  Trip -->|"summarize_trip_details"| Summary
+  classDef model fill:#1f2733,stroke:#3c5a82,color:#cfe1f5;
+  classDef decision fill:#41360f,stroke:#a8842a,color:#f3e3ae;
+  class Trip model;
+  class ApprovalPacket model;
+  class Invoice model;
+  class decision_ApprovalPacket decision;
+  class Summary model;

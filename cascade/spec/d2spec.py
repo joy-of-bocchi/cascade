@@ -140,6 +140,8 @@ def type_str(annotation: Any) -> str:
     `list[Foo]`, `Literal['a', 'b']`, `dict[str, Bar]`."""
     if annotation is None or annotation is NONE_TYPE:
         return "None"
+    if annotation is Ellipsis:
+        return "..."
     origin = get_origin(annotation)
     if origin is None:
         return getattr(annotation, "__name__", str(annotation))

@@ -1,27 +1,8 @@
-#!/usr/bin/env python3
-"""Wrap a Mermaid `.mmd` source file in a full-page, infinite pan/zoom HTML viewer.
-
-Mermaid renders in the browser, so there is no SVG file to post-process the way
-`wrap.py` does for D2. This emits a self-contained page that loads the Mermaid
-runtime from a CDN, renders the diagram, and then drives pan/zoom the same way
-`wrap.py` does: by mutating the SVG `viewBox`, never by CSS-transforming a
-container. The `<svg>` stays viewport-sized, so the browser only rasterizes the
-visible region each frame — flat cost at any zoom depth or canvas size.
-
-    python -m cascade.render.wrapmmd diagram.mmd   ->   diagram.view.html
-"""
-
-from __future__ import annotations
-
-import html
-import sys
-from pathlib import Path
-
-TEMPLATE = """<!DOCTYPE html>
+<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8" />
-<title>__NAME__</title>
+<title>pipeline</title>
 <style>
   html, body { margin: 0; width: 100%; height: 100%; background: #0f1115; overflow: hidden; }
   #wrap { position: fixed; inset: 0; }
@@ -44,9 +25,39 @@ TEMPLATE = """<!DOCTYPE html>
 </style>
 </head>
 <body>
-<div id="hud">__NAME__ &middot; scroll = zoom to cursor &middot; drag = pan &middot; 0 = reset</div>
+<div id="hud">pipeline &middot; scroll = zoom to cursor &middot; drag = pan &middot; 0 = reset</div>
 <div id="wrap"><pre class="mermaid">
-__MMD__
+flowchart TD
+  subgraph trips_default["STAGE: trips — per trip"]
+    Trip["<b>Trip (frozen)</b><br/><table><tr><td>trip_code</td><td>str</td><td>Stable generic trip identifier.</td></tr><tr><td>trip_legs</td><td>tuple[Leg, ...]</td><td>Ordered legs in the trip.</td></tr><tr><td>traveler_count</td><td>int</td><td>Number of travelers on the trip.</td></tr><tr><td>needs_manual_approval</td><td>bool</td><td>Whether this trip requires manual approval.</td></tr></table>"]
+  end
+  subgraph trips_Summarize["STAGE: Summarize — per trip"]
+  end
+  subgraph trips_Approve["STAGE: Approve — per trip"]
+    ApprovalPacket["<b>ApprovalPacket (frozen)</b><br/><table><tr><td>approval_summary</td><td>Summary</td><td>Summary used for approval.</td></tr><tr><td>approval_reason</td><td>str</td><td>Reason attached to the approval path.</td></tr></table>"]
+    decision_ApprovalPacket{"Does this trip need manual approval?"}
+  end
+  subgraph trips_Invoice["STAGE: Invoice — per trip"]
+    Invoice["<b>Invoice (frozen)</b><br/><table><tr><td>billing_packet</td><td>ApprovalPacket</td><td>Approval packet used for billing.</td></tr><tr><td>invoice_units</td><td>int</td><td>Number of billable trip legs.</td></tr><tr><td>payable_amount</td><td>float</td><td>Deterministic payable demo amount.</td></tr></table>"]
+  end
+  subgraph trips_summarize_trip_default["STAGE: trips_summarize_trip — per trip"]
+  end
+  subgraph trips_summarize_trip_Summarize["STAGE: Summarize — per trip"]
+    Summary["<b>Summary (frozen)</b><br/><i>Aggregates the trip legs before approval and billing.</i><br/><table><tr><td>trip</td><td>Trip</td><td>Trip summarized by the pipeline.</td></tr><tr><td>total_miles</td><td>float</td><td>Total distance across all legs.</td></tr><tr><td>total_hours</td><td>float</td><td>Total elapsed hours across all legs.</td></tr><tr><td>average_velocity</td><td>float</td><td>Total miles divided by total hours.</td></tr></table>"]
+  end
+  Summary --> decision_ApprovalPacket
+  decision_ApprovalPacket -->|"prepare_manual_approval"| ApprovalPacket
+  decision_ApprovalPacket -->|"prepare_auto_approval"| ApprovalPacket
+  ApprovalPacket -.->|"create_invoice (absent when gated out)"| Invoice
+  Trip -->|"summarize_trip_details"| Summary
+  classDef model fill:#1f2733,stroke:#3c5a82,color:#cfe1f5;
+  classDef decision fill:#41360f,stroke:#a8842a,color:#f3e3ae;
+  class Trip model;
+  class ApprovalPacket model;
+  class Invoice model;
+  class decision_ApprovalPacket decision;
+  class Summary model;
+
 </pre></div>
 <script type="module">
   import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
@@ -58,7 +69,7 @@ __MMD__
   const svg = host.querySelector("svg");
   if (svg) {
     // Mermaid's own viewBox is the content bounding box — that is the home view.
-    const home = (svg.getAttribute("viewBox") || "0 0 1000 1000").split(/\\s+/).map(Number);
+    const home = (svg.getAttribute("viewBox") || "0 0 1000 1000").split(/\s+/).map(Number);
     const [HX, HY, W, H] = home;
     svg.removeAttribute("width");
     svg.removeAttribute("height");
@@ -110,25 +121,3 @@ __MMD__
 </script>
 </body>
 </html>
-"""
-
-
-def wrap(name: str, mermaid_src: str) -> str:
-    return TEMPLATE.replace("__NAME__", html.escape(name)).replace(
-        "__MMD__", mermaid_src
-    )
-
-
-def main() -> None:
-    if len(sys.argv) != 2:
-        raise SystemExit("usage: python -m cascade.render.wrapmmd <diagram.mmd>")
-    mmd_path = Path(sys.argv[1])
-    out_path = mmd_path.with_suffix(".view.html")
-    mermaid_src = mmd_path.read_text()
-    page = wrap(mmd_path.stem, mermaid_src)
-    out_path.write_text(page)
-    print(out_path)
-
-
-if __name__ == "__main__":
-    main()

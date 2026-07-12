@@ -51,6 +51,7 @@ class Complex(Frozen):
     items: list[Nested]
     ref: Nested
     pair: tuple[int, str]
+    many: tuple[Nested, ...]
     labelled: str = Field(description="Has a description.")
 
 
@@ -136,6 +137,7 @@ def test_type_rendering_optional_list_union_and_nested_model() -> None:
     assert by_name["items"] == "list[Nested]"
     assert by_name["ref"] == "Nested"
     assert by_name["pair"] == "tuple[int, str]"
+    assert by_name["many"] == "tuple[Nested, ...]"
 
 
 def test_deduplicates_shared_base_across_multiple_models() -> None:

@@ -1,0 +1,15 @@
+KEY                              VALUE                            PRODUCER                               STATUS
+Trip.trip_code                   'TRIP-001'                       <root>                                 -
+Trip.trip_legs                   [2 items]                        <root>                                 -
+Trip.traveler_count              2                                <root>                                 -
+Trip.needs_manual_approval       False                            <root>                                 -
+Summary.trip                     Trip(…)                          summarize_trip/summarize_trip_details  SUCCESS 0.0ms
+Summary.total_miles              120.0                            summarize_trip/summarize_trip_details  SUCCESS 0.0ms
+Summary.total_hours              2.0                              summarize_trip/summarize_trip_details  SUCCESS 0.0ms
+Summary.average_velocity         60.0                             summarize_trip/summarize_trip_details  SUCCESS 0.0ms
+ApprovalPacket                   —                                prepare_manual_approval                SKIPPED gate was false
+ApprovalPacket.approval_summary  Summary(…)                       prepare_auto_approval                  SUCCESS 0.0ms
+ApprovalPacket.approval_reason   'No manual approval requested.'  prepare_auto_approval                  SUCCESS 0.0ms
+Invoice.billing_packet           ApprovalPacket(…)                create_invoice                         SUCCESS 0.0ms
+Invoice.invoice_units            2                                create_invoice                         SUCCESS 0.0ms
+Invoice.payable_amount           150.0                            create_invoice                         SUCCESS 0.0ms

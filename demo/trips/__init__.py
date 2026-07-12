@@ -1,0 +1,1 @@
+"""Trips worked example package."""
