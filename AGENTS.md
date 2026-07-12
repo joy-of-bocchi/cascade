@@ -7,10 +7,13 @@ for the source-reading linters' exact rules. This file is only the working rules
 
 ## Shape of the repo
 
-- Flat modules at the top level, no package machinery — and it must stay that way.
-  This repo is designed to be vendored (copied into a host codebase and owned there),
-  never installed. Do not add setup.py/pyproject packaging, `__init__.py`, or a src/
-  layout.
+- One package directory, `cascade/`, grouped by concern (engine / spec / render /
+  lint), with relative imports inside it — that directory is the unit a host copies.
+  Tests live in `tests/`, demo material in `demo/`; neither ships with the copy.
+- No pip/PyPI packaging, ever: no setup.py/pyproject, no version, nothing installable.
+  This repo is vendored (the `cascade/` directory is copied into a host codebase and
+  owned there), never installed. Plain `__init__.py` files are fine — they are what
+  make the copied directory importable from anywhere; publishing machinery is not.
 - Dependencies: pydantic + stdlib. Do not add more.
 - Seams are structural Protocols, not imports. Tools (`specgen.py`, `vocab.py`) must
   not import `engine.py`; they type against a Protocol of the pipeline shape. Keep new
@@ -49,8 +52,9 @@ for the source-reading linters' exact rules. This file is only the working rules
 ## Verify before claiming done
 
 ```
-uv run --with pytest --with pydantic python -m pytest -q          # all test_*.py
+uv run --with pytest --with pydantic python -m pytest tests/ -q
 ruff format . && ruff check .
+uv run --with pydantic python -m cascade.vocab --demo            # CLI smoke: -m form works
 ```
 
 The tests are the behavioral spec (see PORTING.md): a behavior change without a test

@@ -110,7 +110,7 @@ in the evidence file or marked `^[inferred]`.
 Write next to each other: the spec (`<name>_spec.py`, executable), both rendered
 sources with distinct stems (`<name>_mermaid.mmd`, `<name>_d2.d2` — the wrappers
 derive `<stem>.view.html`, so identical stems clobber each other), both viewers
-(`wrapmmd.py` / `wrap.py`, each an infinite viewBox pan/zoom canvas), and the
+(`cascade/render/wrapmmd.py` / `cascade/render/wrap.py`, each an infinite viewBox pan/zoom canvas), and the
 evidence file — a table of `edge | kind | citation | verdict` for every edge plus
 a `claim | citation` section for authored prose. Open a viewer and confirm by
 screenshot that it renders.
@@ -136,9 +136,9 @@ moved.
 ## Toolkit paths
 
 Rendering, spec types, and extraction live in
-`~/.claude/skills/d2-diagram-generation/`: `d2spec.py` (DiagramSpec /
+`~/.claude/skills/d2-diagram-generation/`: `cascade/spec/d2spec.py` (DiagramSpec /
 ModelNode+prose+notes / DecisionNode+rationale / ModuleNode / Group+cadence /
-roots), `render.py` (backends), `speclint.py` (`validate` — includes the
-reachability gate), `wrap.py` / `wrapmmd.py` (viewers), `astflow/` (extractor).
-Run with that directory (and `astflow/`) on `PYTHONPATH`. The cite-or-cut
+roots), `cascade/render/render.py` (backends), `cascade/lint/speclint.py` (`validate` — includes the
+reachability gate), `cascade/render/wrap.py` / `cascade/render/wrapmmd.py` (viewers), `cascade/astflow/` (extractor).
+Run with that directory on `PYTHONPATH`. The cite-or-cut
 rationale is Authoring Rule 3 in that skill's `SKILL.md`.

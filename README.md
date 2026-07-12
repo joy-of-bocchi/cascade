@@ -6,20 +6,20 @@ A discipline and toolkit for **single-source-of-truth, reactive typed dataflows*
 
 ## The seam: one spec, two backends
 
-The source of truth is a `DiagramSpec` — a typed graph of model / decision / terminal nodes, edges, and groups (in `d2spec.py`). A `RenderBackend` turns that spec into diagram text and reports how to rasterize it to SVG:
+The source of truth is a `DiagramSpec` — a typed graph of model / decision / terminal nodes, edges, and groups (in `cascade/spec/d2spec.py`). A `RenderBackend` turns that spec into diagram text and reports how to rasterize it to SVG:
 
 ```
 DiagramSpec ──► RenderBackend.render_spec ──► diagram text ──► SVG
    (typed)        (Mermaid or D2)               (.mmd / .d2)
 ```
 
-`structlint.py` validates the graph regardless of backend: each backend parses its own rendered text back into a shared `structlint.Graph`, and the cycle / dangling-edge / isolated-node checks run on that neutral graph. Switch backends and the structural guarantees still hold; the only thing that changes is the syntax and what the syntax can express.
+`cascade/lint/structlint.py` validates the graph regardless of backend: each backend parses its own rendered text back into a shared `structlint.Graph`, and the cycle / dangling-edge / isolated-node checks run on that neutral graph. Switch backends and the structural guarantees still hold; the only thing that changes is the syntax and what the syntax can express.
 
-Render through the neutral surface in `render.py`:
+Render through the neutral surface in `cascade/render/render.py`:
 
 ```python
-from render import render, render_er, lint, get_backend
-from backends import D2Backend
+from cascade.render import render, render_er, lint, get_backend
+from cascade.render.backends import D2Backend
 
 render(spec)                       # Mermaid (the default)
 render(spec, D2Backend())          # D2, by explicit backend
@@ -28,23 +28,23 @@ render_er([RootModel])             # Mermaid classDiagram from Pydantic roots
 lint(render(spec))                 # structural report on the rendered text
 ```
 
-`build_d2(spec)` (in `d2gen.py`) and `build_er_d2(roots)` (in `d2er.py`) remain as explicit D2 entry points for callers that always want `.d2`.
+`build_d2(spec)` (in `cascade/render/d2gen.py`) and `build_er_d2(roots)` (in `cascade/render/d2er.py`) remain as explicit D2 entry points for callers that always want `.d2`.
 
 ## Registry-to-spec seeding
 
-`specgen.py` turns a typed pipeline registry into a `DiagramSpec` seed. Pass `fragment_from_pipeline(...)` any object with `root_types` and `stages`; each stage can expose `name`, `input_types`, `output_type`, `when`, `section`, `collapse`, `marker`, `question`, `reads_external`, and `sub_pipeline`. Missing optional attributes use neutral defaults, so small registries do not need adapter classes.
+`cascade/spec/specgen.py` turns a typed pipeline registry into a `DiagramSpec` seed. Pass `fragment_from_pipeline(...)` any object with `root_types` and `stages`; each stage can expose `name`, `input_types`, `output_type`, `when`, `section`, `collapse`, `marker`, `question`, `reads_external`, and `sub_pipeline`. Missing optional attributes use neutral defaults, so small registries do not need adapter classes.
 
 Use `merge([fragment], overlay=Overlay(...), extra=AuthoredExtra(...))` to combine the seeded graph with authored nodes, edges, prose, notes, and group cadence overrides. Merge checks stale overlay keys, duplicate ids, dangling references, and authored model-to-model edges that need `intra_stage=True`.
 
 ## Engine
 
-`engine.py` is the executable version of that registry shape. Define frozen Pydantic models, register typed stage functions, then call `build()` to validate and topologically sort the pipeline:
+`cascade/engine/engine.py` is the executable version of that registry shape. Define frozen Pydantic models, register typed stage functions, then call `build()` to validate and topologically sort the pipeline:
 
 ```python
 from pydantic import BaseModel, ConfigDict
 
-from engine import Pipeline, run
-from specgen import fragment_from_pipeline
+from cascade.engine import Pipeline, run
+from cascade.spec import fragment_from_pipeline
 
 
 class Root(BaseModel):
@@ -231,7 +231,7 @@ A raw `.svg` opened in a browser tab has no pan/zoom. And CSS-transforming a lar
 Use the bundled wrapper (in this skill's directory):
 
 ```
-python3 <skill_dir>/wrap.py diagram.svg     # writes diagram.view.html
+python3 <repo>/cascade/render/wrap.py diagram.svg     # writes diagram.view.html
 open diagram.view.html                        # scroll = zoom to cursor, drag = pan, 0 = reset
 ```
 
@@ -265,24 +265,24 @@ Neither backend checks anything. Each will draw a cycle, an FK to a missing PK, 
 **Rendering, viewing, and linting are separate, by design.** The toolkit is split so the concerns never sit on one pipeline:
 
 ```
-shared substrate     d2spec.py     typed spec (DiagramSpec/nodes/edges) + introspection helpers; neutral
-rendering            render.py     neutral surface: render / render_er / lint / get_backend (defaults to Mermaid)
-                     backends/     base.py (the RenderBackend seam) + mermaid.py + d2.py
-                     d2gen.py      build_d2(spec) -> .d2  — explicit-D2 HAND-AUTHORED decision tree w/ inline model tables
-                     d2er.py       build_er_d2(roots) -> .d2  — explicit-D2 AUTO ER from real models (transitive closure)
-                     wrap.py       svg -> infinite pan/zoom .view.html (D2 viewing path)
-linting              structlint.py renderer-neutral graph checks (cycle/dangling/isolated, Tarjan + Kahn)
-                     speclint.py   validate(spec): cycle / frozen / referential / type-flow
-                     d2lint.py     structural checks on a .d2 file via the D2 backend (cycle/dangling/isolated)
-                     decllint.py   single-declaration: each field declared on ONE model (inheritance-aware)
-                     carrylint.py  a bare carry keeps its name: C(speed=o.velocity) FAILs (AST)
-                     derivlint.py  one derivation per value: same fingerprint at two sites FAILs (AST)
-                     namelint.py   one-name + provenance via an explicit canonical registry
-vocabulary           vocab.py      generated canonical name registry from model_fields (TSV artifact + diff)
-run view             rundump.py    dump_run/dump_store: every field, value, producer stage, status
+shared substrate     cascade/spec/d2spec.py        typed spec (DiagramSpec/nodes/edges) + introspection helpers; neutral
+rendering            cascade/render/render.py      neutral surface: render / render_er / lint / get_backend (defaults to Mermaid)
+                     cascade/render/backends/      base.py (the RenderBackend seam) + mermaid.py + d2.py
+                     cascade/render/d2gen.py       build_d2(spec) -> .d2  — explicit-D2 HAND-AUTHORED decision tree w/ inline model tables
+                     cascade/render/d2er.py        build_er_d2(roots) -> .d2  — explicit-D2 AUTO ER from real models (transitive closure)
+                     cascade/render/wrap.py        svg -> infinite pan/zoom .view.html (D2 viewing path)
+linting              cascade/lint/structlint.py    renderer-neutral graph checks (cycle/dangling/isolated, Tarjan + Kahn)
+                     cascade/lint/speclint.py      validate(spec): cycle / frozen / referential / type-flow
+                     cascade/lint/d2lint.py        structural checks on a .d2 file via the D2 backend (cycle/dangling/isolated)
+                     cascade/lint/decllint.py      single-declaration: each field declared on ONE model (inheritance-aware)
+                     cascade/lint/carrylint.py     a bare carry keeps its name: C(speed=o.velocity) FAILs (AST)
+                     cascade/lint/derivlint.py     one derivation per value: same fingerprint at two sites FAILs (AST)
+                     cascade/lint/namelint.py      one-name + provenance via an explicit canonical registry
+vocabulary           cascade/vocab.py              generated canonical name registry from model_fields (TSV artifact + diff)
+run view             cascade/engine/rundump.py     dump_run/dump_store: every field, value, producer stage, status
 ```
 
-`structlint` is the renderer-neutral core: each backend parses its own output into a `structlint.Graph` and the same checks run. `d2lint.py` is the `.d2`-file CLI front end over it; `lint(text)` in `render.py` does the same for whichever backend rendered the text.
+`structlint` is the renderer-neutral core: each backend parses its own output into a `structlint.Graph` and the same checks run. `cascade/lint/d2lint.py` is the `.d2`-file CLI front end over it; `lint(text)` in `cascade/render/render.py` does the same for whichever backend rendered the text.
 
 **One value, one name, one derivation — the layered naming discipline.** The invariant is that a quantity is declared once, never renamed on the way down, and never re-derived. No single check covers that, so it's held in layers, each catching what the previous can't see:
 
@@ -292,34 +292,34 @@ run view             rundump.py    dump_run/dump_store: every field, value, prod
       ├── never renamed ───────── carrylint    C(speed=o.velocity) FAILs
       ├── never re-derived ────── derivlint    same fingerprint twice FAILs
       │                           + engine     write-once store, duplicate-producer build error
-      ├── name is canonical ───── vocab.py     generated registry; a NEW name in the
+      ├── name is canonical ───── cascade/vocab.py generated registry; a NEW name in the
       │                                        diff is the review event ("is `speed`
       │                                        just `velocity`?") — judgment, not code
-      └── visible/debuggable ──── rundump.py   flat dump: field, value, producer, status
+      └── visible/debuggable ──── cascade/engine/rundump.py flat dump: field, value, producer, status
 ```
 
-- **`carrylint.py`** — a *bare carry* (a constructor kwarg whose value is an attribute chain, `C(velocity=o.trip.velocity)`, incl. single-assignment aliases) must keep its field name; a renamed carry is a blocking FAIL. Transformations (`speed=o.velocity * dt`) are new quantities and may take new names. Opaque `**kwargs` and positional construction are warned as untraceable — the fence that keeps the checkable dialect honest.
-- **`derivlint.py`** — the same computation must not be *defined* twice. Every derivation expression (constructor kwargs, `computed_field` returns) is normalized — aliases inlined, parameter roots rewritten to their annotated type names — and fingerprinted; one fingerprint at two distinct sites is a blocking FAIL, even across files and under different names. `Order.distance / Order.time` never collides with `Leg.distance / Leg.time` (types are the identity), and commutativity is deliberately not assumed (catches copy-paste re-derivation, not algebra). Numbered field names (`velocity1`) are banned outright.
-- **`vocab.py`** — the canonical name list is *generated*, never maintained: `build_vocabulary(models)` sweeps `model_fields` (owner attributed via decllint's MRO walk, types rendered with the same helper the diagrams use) into a committed `vocabulary.tsv`. `check_stale` keeps it fresh in CI; `diff_names` makes a new name a visible, reviewable PR event — the one moment where the semantic question "is this a new quantity or an alias?" gets asked, by an agent or a human, against a short list with types and descriptions.
-- **`rundump.py`** — the "why is this weird?" view: `dump_run(built, result)` renders every value in the final store one row per field (`Trip.distance  12450.0  load_trip  SUCCESS 0.2ms`), roots first, sub-pipeline producers as `parent/child` paths, and skipped stages with their reasons — a complete, legible account of the run.
+- **`cascade/lint/carrylint.py`** — a *bare carry* (a constructor kwarg whose value is an attribute chain, `C(velocity=o.trip.velocity)`, incl. single-assignment aliases) must keep its field name; a renamed carry is a blocking FAIL. Transformations (`speed=o.velocity * dt`) are new quantities and may take new names. Opaque `**kwargs` and positional construction are warned as untraceable — the fence that keeps the checkable dialect honest.
+- **`cascade/lint/derivlint.py`** — the same computation must not be *defined* twice. Every derivation expression (constructor kwargs, `computed_field` returns) is normalized — aliases inlined, parameter roots rewritten to their annotated type names — and fingerprinted; one fingerprint at two distinct sites is a blocking FAIL, even across files and under different names. `Order.distance / Order.time` never collides with `Leg.distance / Leg.time` (types are the identity), and commutativity is deliberately not assumed (catches copy-paste re-derivation, not algebra). Numbered field names (`velocity1`) are banned outright.
+- **`cascade/vocab.py`** — the canonical name list is *generated*, never maintained: `build_vocabulary(models)` sweeps `model_fields` (owner attributed via decllint's MRO walk, types rendered with the same helper the diagrams use) into a committed `vocabulary.tsv`. `check_stale` keeps it fresh in CI; `diff_names` makes a new name a visible, reviewable PR event — the one moment where the semantic question "is this a new quantity or an alias?" gets asked, by an agent or a human, against a short list with types and descriptions.
+- **`cascade/engine/rundump.py`** — the "why is this weird?" view: `dump_run(built, result)` renders every value in the final store one row per field (`Trip.distance  12450.0  load_trip  SUCCESS 0.2ms`), roots first, sub-pipeline producers as `parent/child` paths, and skipped stages with their reasons — a complete, legible account of the run.
 
-**`decllint.py` is the minimal, type-first name discipline — prefer it.** `check_single_declaration(models)` introspects the models and flags any field name *declared* on more than one class (attributing each field to the class in its MRO that actually declares it, so inheriting a field counts once, re-declaring it counts twice). That single check enforces both **defined-once-carried-down** (a value lives on one model; downstream nests or inherits it, never re-declares it) and **one-name-per-quantity** (the same name on two unrelated models = one name used for two things). No registry to maintain. `namelint.py` is the heavier alternative when you want an *explicit* canonical registry with declared `derived_from` provenance; reach for it only if you need provenance the models don't already encode via `@computed_field` / factory signatures. It passes on nesting and inheritance, and fails on a re-declared field.
+**`cascade/lint/decllint.py` is the minimal, type-first name discipline — prefer it.** `check_single_declaration(models)` introspects the models and flags any field name *declared* on more than one class (attributing each field to the class in its MRO that actually declares it, so inheriting a field counts once, re-declaring it counts twice). That single check enforces both **defined-once-carried-down** (a value lives on one model; downstream nests or inherits it, never re-declares it) and **one-name-per-quantity** (the same name on two unrelated models = one name used for two things). No registry to maintain. `cascade/lint/namelint.py` is the heavier alternative when you want an *explicit* canonical registry with declared `derived_from` provenance; reach for it only if you need provenance the models don't already encode via `@computed_field` / factory signatures. It passes on nesting and inheritance, and fails on a re-declared field.
 
 `d2gen` imports no linter and no linter imports `d2gen`; both sides depend only on `d2spec`. Lint a spec when you want to — generation never invokes a linter, and a linter never generates. (Run order is the caller's choice: typically `validate(spec)` then `build_d2(spec)`, but they're independent calls.)
 
-**`speclint.py`** — `validate(spec)` runs the spec-level checks: **cycle**, **frozen** (every model node `frozen=True`), **referential** (edge/group references resolve), **type-flow** (a declared edge payload must be producible by the source model). In-degree > 1 is fine — a join/fan-in is normal in a dataflow DAG — so there is no single-producer check; `frozen` + `acyclic` + `type-flow` are the pipeline invariants.
+**`cascade/lint/speclint.py`** — `validate(spec)` runs the spec-level checks: **cycle**, **frozen** (every model node `frozen=True`), **referential** (edge/group references resolve), **type-flow** (a declared edge payload must be producible by the source model). In-degree > 1 is fine — a join/fan-in is normal in a dataflow DAG — so there is no single-producer check; `frozen` + `acyclic` + `type-flow` are the pipeline invariants.
 
-**`d2gen.py`** — the *hand-authored decision-tree* side. `build_d2(spec)` only; each model node's table is introspected from `model_fields`, so a box can't disagree with its class, but the graph (decisions, edges, grouping) is authored because the control logic isn't in the types.
+**`cascade/render/d2gen.py`** — the *hand-authored decision-tree* side. `build_d2(spec)` only; each model node's table is introspected from `model_fields`, so a box can't disagree with its class, but the graph (decisions, edges, grouping) is authored because the control logic isn't in the types.
 
-**`d2er.py`** — the *auto-generated ER* side. `build_er_d2(roots)` introspects the real Pydantic models: each model → a `sql_table`, and every field whose type references another model (directly, optional, in a `list`/`dict`, or in a union) → a column-level relationship edge with cardinality read from the type (`1` / `0..1` / `*`). It transitively closes from the roots you pass, so a single root yields the whole reachable ER, always in sync with the code — no hand-authoring, can't drift. Gotcha: field names that are D2 reserved words (e.g. a field named `label`) are quoted in rows and edges so they don't break compilation.
+**`cascade/render/d2er.py`** — the *auto-generated ER* side. `build_er_d2(roots)` introspects the real Pydantic models: each model → a `sql_table`, and every field whose type references another model (directly, optional, in a `list`/`dict`, or in a union) → a column-level relationship edge with cardinality read from the type (`1` / `0..1` / `*`). It transitively closes from the roots you pass, so a single root yields the whole reachable ER, always in sync with the code — no hand-authoring, can't drift. Gotcha: field names that are D2 reserved words (e.g. a field named `label`) are quoted in rows and edges so they don't break compilation.
 
-**`d2lint.py`** — extracts the directed graph from a `.d2` file (skipping code-block interiors so content arrows aren't mistaken for edges) and runs cycle detection (Tarjan SCC, FAIL), dangling-edge endpoints (FAIL), isolated nodes (WARN), plus a Kahn topo-order when acyclic. No model needed:
+**`cascade/lint/d2lint.py`** — extracts the directed graph from a `.d2` file (skipping code-block interiors so content arrows aren't mistaken for edges) and runs cycle detection (Tarjan SCC, FAIL), dangling-edge endpoints (FAIL), isolated nodes (WARN), plus a Kahn topo-order when acyclic. No model needed:
 
 ```
-uv run --with pydantic python <skill_dir>/d2lint.py diagram.d2   # exit 1 on a blocking (FAIL) violation
+uv run --with pydantic python -m cascade.lint.d2lint diagram.d2   # exit 1 on a blocking (FAIL) violation
 ```
 
-**One-name discipline + provenance (bundled): `namelint.py`.** Enforces single-source-of-truth at the *field* level — SSA for your data, the discipline that no value is ever re-derived. A canonical **registry** names every quantity once (`base(name, type)` / `derived(name, type, from_=[...])`), and models are checked against it:
+**One-name discipline + provenance (bundled): `cascade/lint/namelint.py`.** Enforces single-source-of-truth at the *field* level — SSA for your data, the discipline that no value is ever re-derived. A canonical **registry** names every quantity once (`base(name, type)` / `derived(name, type, from_=[...])`), and models are checked against it:
 
 - **closed vocabulary** — every model field name is a registered canonical name (aliases like `cost` for `upgrade_cost_usd`, and typos, FAIL)
 - **consistent typing** — a name has one canonical type everywhere it appears (same name, two types FAILs)

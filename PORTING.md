@@ -14,8 +14,8 @@ another Python codebase, and how to re-derive them in another language.
                            the run-shaped test, what was deliberately NOT built
 
 2. THE REFERENCE IMPL      Python, pydantic + stdlib only
-   engine.py, specgen.py,  ONE worked example of the discipline — an answer,
-   vocab.py, the linters,  not the definition
+   cascade/engine/engine.py, cascade/spec/specgen.py, ONE worked example of the discipline — an answer,
+   cascade/vocab.py, cascade/lint/,             not the definition
    the renderer stack
 
 3. THE BEHAVIORAL SPEC     the test suite (test_*.py)
@@ -29,7 +29,8 @@ first *how*.
 
 ## Vendoring into another Python codebase
 
-Copy the folder in. The host owns the copy: edit it, delete half of it, rename things —
+Copy the `cascade/` directory in (tests and demo stay behind — the host's suite is
+the translated conformance tests, per below). The host owns the copy: edit it, delete half of it, rename things —
 there is no upstream to appease. Three copy modes, by how much history you want:
 
 - `cp -r` / `git archive` — one-shot, no strings attached.
@@ -41,7 +42,7 @@ install.
 
 ### The seams are Protocols, not imports
 
-The tools do not import the engine. `specgen.py` and `vocab.py` each define a small
+The tools do not import the engine. `cascade/spec/specgen.py` and `cascade/vocab.py` each define a small
 structural Protocol (`.stages`, `.output_type`, `.sub_pipeline`, `.root_types`) and
 accept anything with that shape. A host that already has its own stage engine keeps it
 and vendors only the tools — the engine just has to expose the same duck-typed surface.
@@ -49,9 +50,10 @@ and vendors only the tools — the engine just has to expose the same duck-typed
 Two consequences:
 
 - You can take any subset: only the linters, only the vocabulary, only the renderer.
-  Module-level imports (`vocab` -> `d2spec`, `decllint`) are the only coupling; check the
+  Relative imports inside the package (`vocab` -> `spec.d2spec`, `lint.decllint`) are
+  the only coupling; check the
   import lines at the top of each file you take.
-- `rundump.py` is the one exception: it imports `engine` concretely (it renders
+- `cascade/engine/rundump.py` is the one exception: it imports `cascade.engine` concretely (it renders
   engine-specific run records — statuses, skip reasons, sub-runs). Vendoring rundump
   against a foreign engine means retyping those imports against your engine's
   equivalents.
@@ -61,21 +63,21 @@ Two consequences:
 The recipe: hand an agent artifact 1 (the discipline) and artifact 3 (the tests),
 let it read artifact 2 as *an* implementation rather than *the* implementation, and have
 it re-derive in the target language. Then translate the test suite; the port is done
-when the translated suite is green. This is a proven move — `engine.py` itself was
+when the translated suite is green. This is a proven move — `cascade/engine/engine.py` itself was
 written clean-room from a behavioral spec plus the Protocols, without seeing the code it
 mirrors.
 
 Portability varies by module:
 
 ```
-nearly mechanical          engine.py    typed registry + topo sort + run loop; swap
+nearly mechanical          cascade/engine/engine.py    typed registry + topo sort + run loop; swap
                                         pydantic for the target's validation library
                                         (zod/valibot, serde, encoding/json + validator)
-                           vocab.py     model introspection -> sorted TSV; needs only
+                           cascade/vocab.py            model introspection -> sorted TSV; needs only
                                         "list a type's fields with names/types/docs"
-                           specgen.py   graph walk over the pipeline shape + overlay
+                           cascade/spec/specgen.py     graph walk over the pipeline shape + overlay
                                         merge; pure data transformation
-                           rundump.py   string table over run records
+                           cascade/engine/rundump.py   string table over run records
                            decllint     "which ancestor declares this field" — needs
                                         the target's inheritance introspection
 

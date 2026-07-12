@@ -2,8 +2,8 @@
 
 Language-neutral specification of the two source-reading linters. Everything here is
 stated over parse-tree shapes, not Python's `ast` module, so a port can implement the
-same rules against its own compiler API. The Python implementations (`carrylint.py`,
-`derivlint.py`) and their tests are the reference; where this document and the tests
+same rules against its own compiler API. The Python implementations (`cascade/lint/carrylint.py`,
+`cascade/lint/derivlint.py`) and their tests are the reference; where this document and the tests
 disagree, the tests win.
 
 Both linters share one design law: **untraceable surface warns, never silently

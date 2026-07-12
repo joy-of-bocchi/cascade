@@ -1,0 +1,58 @@
+"""Public engine surface."""
+
+from __future__ import annotations
+
+from .engine import (
+    BuiltPipeline,
+    DuplicateProducerError,
+    DuplicateStageNameError,
+    GatedProducerConflictError,
+    InvalidChildOutputError,
+    InvalidStageInputError,
+    InvalidStageOutputError,
+    MissingChildOutputError,
+    MissingRootError,
+    MissingStageInputError,
+    Pipeline,
+    PipelineBuildError,
+    PipelineCycleError,
+    PipelineRegistrationError,
+    PipelineRunError,
+    RunResult,
+    SnapshotSinkError,
+    StageStatus,
+    StoreOverwriteError,
+    UnknownRootError,
+    WrongOutputTypeError,
+    WrongRootTypeError,
+    run,
+)
+from .rundump import dump_run, dump_store
+
+__all__ = [
+    "BuiltPipeline",
+    "DuplicateProducerError",
+    "DuplicateStageNameError",
+    "GatedProducerConflictError",
+    "InvalidChildOutputError",
+    "InvalidStageInputError",
+    "InvalidStageOutputError",
+    "MissingChildOutputError",
+    "MissingRootError",
+    "MissingStageInputError",
+    "Pipeline",
+    "PipelineBuildError",
+    "PipelineCycleError",
+    "PipelineRegistrationError",
+    "PipelineRunError",
+    "RunResult",
+    "SnapshotSinkError",
+    "StageStatus",
+    "StoreOverwriteError",
+    "UnknownRootError",
+    "WrongOutputTypeError",
+    "WrongRootTypeError",
+    "dump_run",
+    "dump_store",
+    "run",
+]
