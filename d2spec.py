@@ -212,6 +212,7 @@ def entity_fields(entity: type) -> list[FieldView]:
                     name=name,
                     annotation=info.return_type,
                     default="computed",
+                    description=info.description or "",
                     computed=True,
                 )
             )

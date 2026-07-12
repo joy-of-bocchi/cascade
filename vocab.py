@@ -9,21 +9,34 @@ of the artifact lets CI diff it: when a PR introduces a NEW name the diff surfac
 it as the "registration gate" event, where an agent or human asks the only
 question that matters — "is `speed` actually the existing `velocity`?".
 
-The vocabulary attributes each field to the ONE class in the MRO that actually
-declares it (same logic as `decllint.declaring_class`), so an inherited field is
-owned by its declaring base and listed once, not repeated per subclass.
-
-    from vocab import build_vocabulary, render_tsv, diff_names, check_stale
+The public helpers are `build_vocabulary`, `render_tsv`, `diff_names`, and
+`check_stale`.
 """
 
 from __future__ import annotations
 
-from typing import Iterable
+import argparse
+import dataclasses
+import importlib
+from typing import Iterable, Protocol
 
 from pydantic import BaseModel, ConfigDict
 
-from d2spec import entity_fields, type_str
+from d2spec import entity_fields, mentioned_types, type_str
 from decllint import declaring_class
+
+_DEMO_BACKENDS_MISSING: object = object()
+
+try:
+    _demo_backends = importlib.import_module("demo_backends")
+except Exception:
+    _DEMO_BACKEND_MODELS: tuple[type[BaseModel], ...] | object = _DEMO_BACKENDS_MISSING
+else:
+    _DEMO_BACKEND_MODELS = (
+        _demo_backends.Address,
+        _demo_backends.Customer,
+        _demo_backends.Order,
+    )
 
 # The artifact is tab-separated with a two-line comment header. `#`-prefixed
 # lines are metadata and are ignored on parse; every other line is one field.
@@ -37,6 +50,16 @@ FIELD_COLUMNS = 4
 # Descriptions are free text; tabs/newlines would break the row grid, so they
 # collapse to single spaces on render.
 _WHITESPACE_TO_SPACE = str.maketrans({"\t": " ", "\n": " ", "\r": " "})
+
+
+class StageVocabProtocol(Protocol):
+    output_type: type
+    sub_pipeline: BuiltPipelineProtocol | None
+
+
+class BuiltPipelineProtocol(Protocol):
+    root_types: Iterable[type]
+    stages: Iterable[StageVocabProtocol]
 
 
 class VocabEntry(BaseModel):
@@ -88,6 +111,64 @@ def build_vocabulary(models: Iterable[type[BaseModel]]) -> list[VocabEntry]:
     return sorted(by_key.values(), key=lambda entry: (entry.name, entry.owner))
 
 
+def _pipeline_declared_types(built: BuiltPipelineProtocol) -> list[type]:
+    declared: list[type] = []
+    pending: list[BuiltPipelineProtocol] = [built]
+    while pending:
+        current: BuiltPipelineProtocol = pending.pop()
+        root_types: Iterable[type] = getattr(current, "root_types")
+        declared.extend(
+            root_type for root_type in root_types if isinstance(root_type, type)
+        )
+        stages: Iterable[StageVocabProtocol] = getattr(current, "stages")
+        for stage in stages:
+            output_type: type = getattr(stage, "output_type")
+            if isinstance(output_type, type):
+                declared.append(output_type)
+            sub_pipeline: BuiltPipelineProtocol | None = getattr(
+                stage, "sub_pipeline", None
+            )
+            if sub_pipeline is not None:
+                pending.append(sub_pipeline)
+    return declared
+
+
+def _is_vocab_model(candidate: type) -> bool:
+    if candidate is BaseModel:
+        return False
+    if issubclass(candidate, BaseModel):
+        return True
+    return dataclasses.is_dataclass(candidate)
+
+
+def pipeline_models(built: BuiltPipelineProtocol) -> list[type[BaseModel]]:
+    """All entity models declared or transitively mentioned by a built pipeline."""
+    worklist: list[type] = _pipeline_declared_types(built)
+    seen: set[type] = set()
+    models: set[type[BaseModel]] = set()
+    while worklist:
+        candidate: type = worklist.pop()
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        if not _is_vocab_model(candidate):
+            continue
+        models.add(candidate)
+        mentioned: set[type] = mentioned_types(candidate)
+        worklist.extend(model for model in mentioned if model not in seen)
+    return sorted(
+        models,
+        key=lambda model: (
+            getattr(model, "__name__", ""),
+            getattr(model, "__module__", ""),
+        ),
+    )
+
+
+def vocabulary_from_pipeline(built: BuiltPipelineProtocol) -> list[VocabEntry]:
+    return build_vocabulary(pipeline_models(built))
+
+
 def _sanitize(text: str) -> str:
     """Flatten any tab/newline in free text to spaces so it stays on one row."""
     return text.translate(_WHITESPACE_TO_SPACE)
@@ -135,7 +216,9 @@ def parse_tsv(text: str) -> list[VocabEntry]:
     return entries
 
 
-def _facets_by_name(entries: Iterable[VocabEntry]) -> dict[str, tuple[tuple[str, str, str], ...]]:
+def _facets_by_name(
+    entries: Iterable[VocabEntry],
+) -> dict[str, tuple[tuple[str, str, str], ...]]:
     """Map each name to the sorted tuple of its (type, owner, description)
     facets. A name usually maps to one facet; a name declared on two owners
     (a decllint violation) maps to two, compared deterministically."""
@@ -147,9 +230,7 @@ def _facets_by_name(entries: Iterable[VocabEntry]) -> dict[str, tuple[tuple[str,
     return {name: tuple(sorted(facets)) for name, facets in grouped.items()}
 
 
-def diff_names(
-    committed: list[VocabEntry], generated: list[VocabEntry]
-) -> VocabDiff:
+def diff_names(committed: list[VocabEntry], generated: list[VocabEntry]) -> VocabDiff:
     """The registration-gate diff between the committed artifact and a freshly
     generated one, keyed by name: `added` names appear only in generated,
     `removed` only in committed, `changed` appear in both with a different
@@ -176,25 +257,20 @@ def check_stale(committed_text: str, models: Iterable[type[BaseModel]]) -> bool:
 
 def _demo_models() -> list[type[BaseModel]]:
     """The demo models to describe: the entities from `demo_backends` if it
-    imports cleanly, else a small self-contained example."""
-    try:
-        from demo_backends import Address, Customer, Order
+    loads cleanly, else a small self-contained example."""
+    if _DEMO_BACKEND_MODELS is not _DEMO_BACKENDS_MISSING:
+        return list(_DEMO_BACKEND_MODELS)
 
-        return [Address, Customer, Order]
-    except Exception:
+    class _DemoBase(BaseModel):
+        model_config = ConfigDict(frozen=True, extra="forbid")
 
-        class _DemoBase(BaseModel):
-            model_config = ConfigDict(frozen=True)
+    class Trip(_DemoBase):
+        distance: float
 
-        class Trip(_DemoBase):
-            distance: float
-
-        return [Trip]
+    return [Trip]
 
 
 def main() -> int:
-    import argparse
-
     parser = argparse.ArgumentParser(description="Cascade vocabulary generator.")
     parser.add_argument(
         "--demo",

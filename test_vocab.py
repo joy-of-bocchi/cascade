@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+import pytest
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from vocab import (
     VocabDiff,
@@ -9,7 +10,9 @@ from vocab import (
     check_stale,
     diff_names,
     parse_tsv,
+    pipeline_models,
     render_tsv,
+    vocabulary_from_pipeline,
 )
 
 
@@ -51,6 +54,59 @@ class Complex(Frozen):
     labelled: str = Field(description="Has a description.")
 
 
+class LineItem(Frozen):
+    sku: str = Field(description="Line item stock keeping unit.")
+
+
+class Order(Frozen):
+    items: list[LineItem]
+
+
+class RootInput(Frozen):
+    order_id: str
+
+
+class PreparedOrder(Frozen):
+    order: Order
+
+
+class FinalSummary(Frozen):
+    total_items: int
+
+    @computed_field(description="Whether the order contains any line items.")
+    @property
+    def has_items(self) -> bool:
+        return self.total_items > 0
+
+
+class NestedPipelineOutput(Frozen):
+    summary: FinalSummary
+
+
+class ToyStage:
+    output_type: type
+    sub_pipeline: ToyPipeline | None
+
+    def __init__(
+        self, output_type: type, sub_pipeline: ToyPipeline | None = None
+    ) -> None:
+        self.output_type = output_type
+        self.sub_pipeline = sub_pipeline
+
+
+class ToyPipeline:
+    root_types: tuple[type, ...]
+    stages: tuple[ToyStage, ...]
+
+    def __init__(
+        self,
+        root_types: tuple[type, ...] = (),
+        stages: tuple[ToyStage, ...] = (),
+    ) -> None:
+        self.root_types = root_types
+        self.stages = stages
+
+
 def test_field_description_is_captured() -> None:
     entries = build_vocabulary([Complex])
     labelled = next(entry for entry in entries if entry.name == "labelled")
@@ -84,9 +140,7 @@ def test_type_rendering_optional_list_union_and_nested_model() -> None:
 
 def test_deduplicates_shared_base_across_multiple_models() -> None:
     # Base reached via three different models must still yield one `shared` entry.
-    entries = build_vocabulary(
-        [Base, ChildInherits, ChildAlsoInherits, ChildInherits]
-    )
+    entries = build_vocabulary([Base, ChildInherits, ChildAlsoInherits, ChildInherits])
     shared = [entry for entry in entries if entry.name == "shared"]
     assert len(shared) == 1
 
@@ -103,9 +157,7 @@ def test_render_is_sorted_and_deterministic() -> None:
     forward = render_tsv(build_vocabulary([Complex, ChildInherits]))
     reversed_input = render_tsv(build_vocabulary([ChildInherits, Complex]))
     assert forward == reversed_input
-    data_lines = [
-        line for line in forward.splitlines() if not line.startswith("#")
-    ]
+    data_lines = [line for line in forward.splitlines() if not line.startswith("#")]
     names = [line.split("\t")[0] for line in data_lines]
     assert names == sorted(names)
 
@@ -160,9 +212,7 @@ def test_diff_names_reports_added_removed_and_changed() -> None:
         VocabEntry(name="delta", type_name="int", owner="M", description="d"),
     ]
     diff = diff_names(committed, generated)
-    assert diff == VocabDiff(
-        added=("delta",), removed=("gamma",), changed=("beta",)
-    )
+    assert diff == VocabDiff(added=("delta",), removed=("gamma",), changed=("beta",))
 
 
 def test_diff_names_detects_owner_only_change() -> None:
@@ -187,8 +237,68 @@ def test_check_stale_false_when_committed_matches() -> None:
 
 
 def test_vocab_entry_is_frozen() -> None:
-    import pytest
-
     entry = VocabEntry(name="x", type_name="int", owner="M")
     with pytest.raises(Exception):
         entry.name = "y"  # type: ignore[misc]
+
+
+def test_pipeline_models_discovers_roots_stage_outputs_nested_pipelines_and_fields() -> (
+    None
+):
+    child: ToyPipeline = ToyPipeline(
+        stages=(
+            ToyStage(output_type=NestedPipelineOutput),
+            ToyStage(output_type=str),
+        )
+    )
+    pipeline: ToyPipeline = ToyPipeline(
+        root_types=(RootInput, int, BaseModel),
+        stages=(
+            ToyStage(output_type=PreparedOrder),
+            ToyStage(output_type=list, sub_pipeline=child),
+        ),
+    )
+    models: list[type[BaseModel]] = pipeline_models(pipeline)
+    model_names: list[str] = [model.__name__ for model in models]
+    assert model_names == sorted(model_names)
+    assert model_names == [
+        "FinalSummary",
+        "LineItem",
+        "NestedPipelineOutput",
+        "Order",
+        "PreparedOrder",
+        "RootInput",
+    ]
+    assert len(models) == len(set(models))
+
+
+def test_pipeline_models_discovers_model_reachable_only_through_field_annotation() -> (
+    None
+):
+    pipeline: ToyPipeline = ToyPipeline(stages=(ToyStage(output_type=Order),))
+    models: list[type[BaseModel]] = pipeline_models(pipeline)
+    assert LineItem in models
+
+
+def test_vocabulary_from_pipeline_includes_transitively_discovered_model_field() -> (
+    None
+):
+    pipeline: ToyPipeline = ToyPipeline(stages=(ToyStage(output_type=Order),))
+    entries: list[VocabEntry] = vocabulary_from_pipeline(pipeline)
+    by_name: dict[str, VocabEntry] = {entry.name: entry for entry in entries}
+    assert by_name["sku"] == VocabEntry(
+        name="sku",
+        type_name="str",
+        owner="LineItem",
+        description="Line item stock keeping unit.",
+    )
+
+
+def test_computed_field_description_is_captured() -> None:
+    entries: list[VocabEntry] = vocabulary_from_pipeline(
+        ToyPipeline(stages=(ToyStage(output_type=FinalSummary),))
+    )
+    by_name: dict[str, VocabEntry] = {entry.name: entry for entry in entries}
+    assert by_name["has_items"].description == (
+        "Whether the order contains any line items."
+    )
