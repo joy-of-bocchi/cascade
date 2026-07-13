@@ -17,7 +17,12 @@ import html
 import sys
 from pathlib import Path
 
-TEMPLATE = """<!DOCTYPE html>
+MERMAID_VERSION: str = "11.16.0"
+MERMAID_CDN_URL: str = (
+    f"https://cdn.jsdelivr.net/npm/mermaid@{MERMAID_VERSION}/dist/mermaid.esm.min.mjs"
+)
+
+_TEMPLATE_SOURCE: str = """<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8" />
@@ -40,21 +45,32 @@ TEMPLATE = """<!DOCTYPE html>
     background: #0009; padding: 6px 10px; border-radius: 7px;
     user-select: none; pointer-events: none;
   }
-  .mermaid { opacity: 0; width: 100%; height: 100%; }
+  .mermaid {
+    box-sizing: border-box; width: 100%; height: 100%; margin: 0;
+    padding: 3rem 1rem 1rem; overflow: auto; white-space: pre;
+    color: #c9d1d9; font: 12px/1.45 ui-monospace, monospace;
+  }
+  .mermaid.rendered { padding: 0; overflow: hidden; }
+  #fallback-note {
+    position: fixed; right: 10px; top: 10px; z-index: 10;
+    color: #f0c674; font: 12px ui-monospace, monospace;
+    background: #000c; padding: 6px 10px; border-radius: 7px;
+  }
 </style>
 </head>
 <body>
 <div id="hud">__NAME__ &middot; scroll = zoom to cursor &middot; drag = pan &middot; 0 = reset</div>
+<noscript><div id="fallback-note">Interactive renderer unavailable; Mermaid source is shown.</div></noscript>
 <div id="wrap"><pre class="mermaid">
 __MMD__
 </pre></div>
 <script type="module">
-  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  import mermaid from "__MERMAID_CDN_URL__";
 
+  const host = document.querySelector(".mermaid");
   mermaid.initialize({ startOnLoad: false, theme: "dark", maxTextSize: 500000, maxEdges: 5000 });
   await mermaid.run();
 
-  const host = document.querySelector(".mermaid");
   const svg = host.querySelector("svg");
   if (svg) {
     // Mermaid's own viewBox is the content bounding box — that is the home view.
@@ -64,7 +80,7 @@ __MMD__
     svg.removeAttribute("height");
     svg.style.maxWidth = "none";
     svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
-    host.style.opacity = 1;
+    host.classList.add("rendered");
 
     let vb = { x: HX, y: HY, w: W, h: H };
     const apply = () => svg.setAttribute("viewBox", `${vb.x} ${vb.y} ${vb.w} ${vb.h}`);
@@ -111,6 +127,8 @@ __MMD__
 </body>
 </html>
 """
+
+TEMPLATE: str = _TEMPLATE_SOURCE.replace("__MERMAID_CDN_URL__", MERMAID_CDN_URL)
 
 
 def wrap(name: str, mermaid_src: str) -> str:

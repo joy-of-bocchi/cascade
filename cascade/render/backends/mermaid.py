@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import pathlib
 import re
+from collections import Counter
 
 from ...lint import structlint
 from ...spec.d2spec import (
@@ -132,6 +133,36 @@ def _attr_type(rendered: str) -> str:
     token = _ATTR_TYPE_SANITIZE_RE.sub("_", token)
     token = _UNDERSCORE_COLLAPSE_RE.sub("_", token).strip("_")
     return token or DEFAULT_ATTR_TYPE
+
+
+def _qualified_entity_name(model: type) -> str:
+    qualified_name: str = f"{model.__module__}.{model.__qualname__}"
+    return _nid(qualified_name)
+
+
+def _er_entity_ids(models: list[type]) -> dict[type, str]:
+    name_counts: Counter[str] = Counter(model.__name__ for model in models)
+    entity_ids: dict[type, str] = {}
+    models_by_entity_id: dict[str, type] = {}
+
+    for model in models:
+        entity_id: str = (
+            model.__name__
+            if name_counts[model.__name__] == 1
+            else _qualified_entity_name(model)
+        )
+        existing: type | None = models_by_entity_id.get(entity_id)
+        if existing is not None and existing is not model:
+            existing_name: str = f"{existing.__module__}.{existing.__qualname__}"
+            model_name: str = f"{model.__module__}.{model.__qualname__}"
+            raise ValueError(
+                f"Mermaid ER entity id collision for {entity_id!r}: "
+                f"{existing_name} and {model_name}"
+            )
+        entity_ids[model] = entity_id
+        models_by_entity_id[entity_id] = model
+
+    return entity_ids
 
 
 def _model_label(node: ModelNode) -> str:
@@ -248,10 +279,12 @@ class MermaidBackend(RenderBackend):
     ) -> str:
         models = _closure(roots)
         in_scope = set(models)
+        entity_ids = _er_entity_ids(models)
         out: list[str] = ["erDiagram", ""]
 
         for model in models:
-            out.append(f"  {model.__name__} {{")
+            entity_id = entity_ids[model]
+            out.append(f"  {entity_id} {{")
             for view in entity_fields(model):
                 attr = _attr_type(type_str(view.annotation))
                 if view.computed:
@@ -265,7 +298,9 @@ class MermaidBackend(RenderBackend):
             for name, ref, card in _field_refs(model):
                 if ref in in_scope:
                     crow = ER_CROWFOOT.get(card, ER_CROWFOOT_DEFAULT)
-                    out.append(f'  {model.__name__} {crow} {ref.__name__} : "{name}"')
+                    out.append(
+                        f'  {entity_ids[model]} {crow} {entity_ids[ref]} : "{name}"'
+                    )
 
         return "\n".join(out) + "\n"
 

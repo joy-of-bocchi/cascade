@@ -11,6 +11,7 @@ other; they only share this schema.
 from __future__ import annotations
 
 import dataclasses
+import re
 from enum import StrEnum
 from types import UnionType
 from typing import Annotated, Any, Literal, Union, get_args, get_origin, get_type_hints
@@ -19,6 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic.fields import FieldInfo
 
 NONE_TYPE = type(None)
+MEMORY_ADDRESS_RE: re.Pattern[str] = re.compile(r" at 0x[0-9a-fA-F]+")
 
 
 def is_entity(obj: Any) -> bool:
@@ -146,12 +148,26 @@ def type_str(annotation: Any) -> str:
     if origin is None:
         return getattr(annotation, "__name__", str(annotation))
     args = get_args(annotation)
+    if origin is Annotated:
+        base_type: str = type_str(args[0])
+        metadata: str = ", ".join(_annotation_metadata_str(arg) for arg in args[1:])
+        return f"Annotated[{base_type}, {metadata}]"
     if origin is Union or origin is UnionType:
         return " | ".join(type_str(arg) for arg in args)
     if origin is Literal:
         return "Literal[" + ", ".join(repr(arg) for arg in args) + "]"
     name = getattr(origin, "__name__", str(origin))
     return f"{name}[{', '.join(type_str(arg) for arg in args)}]"
+
+
+def _annotation_metadata_str(metadata: Any) -> str:
+    metadata_func: Any = getattr(metadata, "func", None)
+    if callable(metadata_func):
+        func_name: str = getattr(
+            metadata_func, "__name__", type(metadata_func).__name__
+        )
+        return f"{type(metadata).__name__}({func_name})"
+    return MEMORY_ADDRESS_RE.sub("", repr(metadata))
 
 
 def field_default(info: FieldInfo) -> str:
