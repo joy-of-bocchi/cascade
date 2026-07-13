@@ -127,6 +127,7 @@ run view             cascade/engine/rundump.py     dump_run/dump_store: every fi
 
 | doc | question it answers |
 |---|---|
+| `docs/PITCH.md` | the case for cascade — what rots without it and why the bet works; start here to convince someone |
 | `docs/INTENT.md` | why is it built this way? invariants, the naming discipline, what was deliberately not built |
 | `docs/RENDERING.md` | Mermaid vs D2, the D2 performance rules, viewing (`viewBox`, `foreignObject`, ELK) |
 | `PORTING.md` | adopting in another codebase (vendor, don't install); porting to another language |
